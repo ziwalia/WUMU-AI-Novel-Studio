@@ -1,0 +1,29 @@
+# 依赖目录（可通过 npm install / cargo build 重新生成）
+node_modules/
+src-tauri/target/
+
+# 构建输出
+dist/
+
+# Tauri 自动生成的文件
+src-tauri/gen/
+
+# 系统文件
+Thumbs.db
+Desktop.ini
+.DS_Store
+
+# 编辑器配置
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# 环境变量（可能包含密钥，绝对不能提交）
+.env
+.env.local
+.env.*.local
+
+# 日志文件
+*.log
+npm-debug.log*

@@ -28,5 +28,7 @@ Desktop.ini
 *.log
 npm-debug.log*
 
-# 个人文档（不提交到仓库）
+# 个人文档和工具（不提交到仓库）
 怎么提交版本.md
+scripts/publish.js
+发布新版本.bat

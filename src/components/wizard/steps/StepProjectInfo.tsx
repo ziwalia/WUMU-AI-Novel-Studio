@@ -2,7 +2,6 @@ import { useMemo, useState } from 'react'
 import { useNovelStore } from '@/stores/novelStore'
 import { useUIStore } from '@/stores/uiStore'
 import { useSessionStore } from '@/stores/sessionStore'
-import { WRITING_STYLE_PRESETS, WRITING_STYLE_OPTIONS } from '@/services/prompts/writingStyles'
 import { runAutoGeneration, resetAutoAbort, type AutoGenConfig } from '@/services/autoGenerationService'
 import { ConfirmDialog } from '@/components/shared/ConfirmDialog'
 
@@ -15,6 +14,8 @@ export function StepProjectInfo() {
   if (!project) return null
 
   const genres = useUIStore((s) => s.genres)
+  const writingStyles = useUIStore((s) => s.writingStyles)
+  const [selectedStyleIdx, setSelectedStyleIdx] = useState<number | ''>('')
   const addToast = useUIStore((s) => s.addToast)
   const setAutoGenerating = useUIStore((s) => s.setAutoGenerating)
   const isStreaming = useSessionStore((s) => s.isStreaming)
@@ -248,23 +249,25 @@ export function StepProjectInfo() {
           </label>
           <select
             id="writingStyleSelect"
-            value=""
+            value={selectedStyleIdx}
             onChange={(e) => {
-              const key = e.target.value
-              if (key && WRITING_STYLE_PRESETS[key]) {
-                update({ writingStyle: WRITING_STYLE_PRESETS[key]!.description })
+              const val = e.target.value
+              const idx = Number(val)
+              setSelectedStyleIdx(val === '' ? '' : idx)
+              if (val !== '' && writingStyles[idx]) {
+                update({ writingStyle: writingStyles[idx]!.description })
               }
             }}
             className="w-full px-3 py-2 text-sm bg-[var(--color-surface-container-lowest)] border border-[var(--color-border)] rounded-[var(--radius-md)] text-[var(--color-text-primary)] focus:outline-none focus:ring-1 focus:ring-[var(--color-border-focus)]"
           >
             <option value="">选择预设文风（可选）</option>
-            {WRITING_STYLE_OPTIONS.map((opt) => (
-              <option key={opt.key} value={opt.key}>{opt.label}</option>
+            {writingStyles.map((style, i) => (
+              <option key={i} value={i}>{style.name}</option>
             ))}
           </select>
           <textarea
             value={params.writingStyle}
-            onChange={(e) => update({ writingStyle: e.target.value })}
+            onChange={(e) => { update({ writingStyle: e.target.value }); setSelectedStyleIdx('') }}
             placeholder="选择上方预设自动填入，或自定义描述你期望的文笔风格"
             rows={6}
             className="w-full mt-2 px-3 py-2 text-sm bg-[var(--color-surface-container-lowest)] border border-[var(--color-border)] rounded-[var(--radius-md)] text-[var(--color-text-primary)] placeholder:text-[var(--color-text-tertiary)] focus:outline-none focus:ring-1 focus:ring-[var(--color-border-focus)] resize-none"

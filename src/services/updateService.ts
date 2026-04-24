@@ -1,12 +1,8 @@
 const GITHUB_REPO = 'ziwalia/WUMU-AI-Novel-Studio'
-const CHECK_INTERVAL = 30 * 60 * 1000 // 30分钟检查一次
+const CHECK_INTERVAL = 30 * 60 * 1000
 
 let lastCheckTime = 0
 let cachedLatestVersion: string | null = null
-
-function isTauriApp(): boolean {
-  return !!(window as unknown as Record<string, unknown>).__TAURI_INTERNALS__
-}
 
 async function fetchLatestVersion(): Promise<string | null> {
   try {
@@ -15,7 +11,6 @@ async function fetchLatestVersion(): Promise<string | null> {
       { headers: { Accept: 'application/vnd.github.v3+json' } }
     )
     if (!res.ok) {
-      // 仓库无 Release 或仓库不存在时返回 null，不输出错误
       res.body?.cancel()
       return null
     }
@@ -46,11 +41,6 @@ export interface UpdateCheckResult {
 
 export async function checkForUpdate(): Promise<UpdateCheckResult> {
   const currentVersion = __APP_VERSION__
-
-  // 桌面版由 Tauri 更新器处理，这里只管网页版
-  if (isTauriApp()) {
-    return { hasUpdate: false, currentVersion, latestVersion: null, downloadUrl: '' }
-  }
 
   const now = Date.now()
   if (now - lastCheckTime < CHECK_INTERVAL && cachedLatestVersion !== null) {

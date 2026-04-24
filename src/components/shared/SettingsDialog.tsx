@@ -1,15 +1,17 @@
 import { useState } from 'react'
 import { useUIStore, type FontConfig, type GenreItem } from '@/stores/uiStore'
+import type { WritingStyleItem } from '@/data/defaultWritingStyles'
 
 const FONT_OPTIONS = [
   'SimSun', 'Microsoft YaHei', 'KaiTi', 'FangSong', 'SimHei',
   'Arial', 'Georgia', 'Times New Roman',
 ]
 
-type SettingsTab = 'font' | 'genre'
+type SettingsTab = 'font' | 'genre' | 'writingStyle'
 const TABS: { key: SettingsTab; label: string; icon: string }[] = [
   { key: 'font', label: '字体设置', icon: 'text_fields' },
   { key: 'genre', label: '类型管理', icon: 'category' },
+  { key: 'writingStyle', label: '文笔文风管理', icon: 'brush' },
 ]
 
 export function SettingsDialog() {
@@ -21,6 +23,10 @@ export function SettingsDialog() {
   const addGenre = useUIStore((s) => s.addGenre)
   const updateGenre = useUIStore((s) => s.updateGenre)
   const removeGenre = useUIStore((s) => s.removeGenre)
+  const writingStyles = useUIStore((s) => s.writingStyles)
+  const addWritingStyle = useUIStore((s) => s.addWritingStyle)
+  const updateWritingStyle = useUIStore((s) => s.updateWritingStyle)
+  const removeWritingStyle = useUIStore((s) => s.removeWritingStyle)
 
   const [activeTab, setActiveTab] = useState<SettingsTab>('font')
 
@@ -30,7 +36,7 @@ export function SettingsDialog() {
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40" onClick={() => setSettingsOpen(false)}>
       <div
         className="bg-[var(--color-surface)] rounded-lg shadow-xl flex flex-col border border-[var(--color-border)]"
-        style={{ width: '90vw', maxWidth: '1200px', maxHeight: '85vh', fontFamily: "'Microsoft YaHei', sans-serif", fontWeight: 600 }}
+        style={{ width: '90vw', minWidth: '920px', maxWidth: '1200px', height: '80vh', fontFamily: "'Microsoft YaHei', sans-serif", fontWeight: 600 }}
         onClick={(e) => e.stopPropagation()}
       >
         <div className="flex items-center justify-between px-5 py-3 border-b border-[var(--color-border-separator)]">
@@ -60,6 +66,14 @@ export function SettingsDialog() {
         <div className="flex-1 overflow-y-auto p-5">
           {activeTab === 'font' && <FontSection font={fontGlobal} onChange={setFontGlobal} />}
           {activeTab === 'genre' && <GenreSection genres={genres} onAdd={addGenre} onUpdate={updateGenre} onRemove={removeGenre} />}
+          {activeTab === 'writingStyle' && (
+            <WritingStyleSection
+              styles={writingStyles}
+              onAdd={addWritingStyle}
+              onUpdate={updateWritingStyle}
+              onRemove={removeWritingStyle}
+            />
+          )}
         </div>
       </div>
     </div>
@@ -346,6 +360,157 @@ function GenreSection({ genres, onAdd, onUpdate, onRemove }: {
           <div className="text-center py-8 text-[var(--color-text-tertiary)]">
             <span className="material-symbols-outlined text-3xl block mb-2">category</span>
             暂无{channel === 'male' ? '男频' : '女频'}分类数据
+          </div>
+        )}
+      </div>
+    </div>
+  )
+}
+
+const emptyStyleForm = (): WritingStyleItem => ({ name: '', description: '' })
+
+function WritingStyleSection({ styles, onAdd, onUpdate, onRemove }: {
+  styles: WritingStyleItem[]
+  onAdd: (s: WritingStyleItem) => void
+  onUpdate: (i: number, s: WritingStyleItem) => void
+  onRemove: (i: number) => void
+}) {
+  const [editingIdx, setEditingIdx] = useState<number | null>(null)
+  const [adding, setAdding] = useState(false)
+  const [form, setForm] = useState<WritingStyleItem>(emptyStyleForm())
+
+  const startEdit = (idx: number) => {
+    setEditingIdx(idx)
+    setForm({ ...styles[idx]! })
+    setAdding(false)
+  }
+
+  const startAdd = () => {
+    setAdding(true)
+    setForm(emptyStyleForm())
+    setEditingIdx(null)
+  }
+
+  const handleSave = () => {
+    if (!form.name.trim()) return
+    if (editingIdx !== null) {
+      onUpdate(editingIdx, { ...form })
+      setEditingIdx(null)
+    } else if (adding) {
+      onAdd({ ...form })
+      setAdding(false)
+    }
+    setForm(emptyStyleForm())
+  }
+
+  const cancelEdit = () => {
+    setEditingIdx(null)
+    setAdding(false)
+    setForm(emptyStyleForm())
+  }
+
+  return (
+    <div className="flex flex-col h-full">
+      <div className="flex items-center gap-2 mb-4">
+        <span className="text-sm text-[var(--color-text-tertiary)]">
+          共 {styles.length} 种文笔风格
+        </span>
+        <div className="flex-1" />
+        {!adding && editingIdx === null && (
+          <button
+            onClick={startAdd}
+            className="flex items-center gap-1 px-3 py-2 text-sm text-[var(--color-primary)] font-bold hover:bg-[var(--color-surface-hover)] rounded-md border border-[var(--color-primary)]/30"
+          >
+            <span className="material-symbols-outlined text-base">add</span>
+            新增文风
+          </button>
+        )}
+      </div>
+
+      {adding && (
+        <div className="bg-[var(--color-surface-container-lowest)] border border-[var(--color-primary)] rounded-lg p-4 mb-4 space-y-3">
+          <div className="text-sm font-bold text-[var(--color-primary)] mb-2">新增文笔风格</div>
+          <FormRow label="风格名称">
+            <input value={form.name} onChange={(e) => setForm((p) => ({ ...p, name: e.target.value }))}
+              className="flex-1 text-sm bg-[var(--color-surface)] border border-[var(--color-border)] rounded px-2 py-1.5 text-[var(--color-text-primary)]"
+              placeholder="如：豪放热血风" />
+          </FormRow>
+          <FormRow label="风格描述">
+            <textarea
+              value={form.description}
+              onChange={(e) => setForm((p) => ({ ...p, description: e.target.value }))}
+              rows={8}
+              className="flex-1 text-sm bg-[var(--color-surface)] border border-[var(--color-border)] rounded px-2 py-1.5 text-[var(--color-text-primary)] resize-none"
+              placeholder="详细描述该文笔风格的要求、特点，可包含参考例句"
+            />
+          </FormRow>
+          <div className="flex items-center gap-2 justify-end pt-1">
+            <button onClick={cancelEdit} className="text-sm text-[var(--color-text-tertiary)] hover:text-[var(--color-text-secondary)] px-3 py-1.5">取消</button>
+            <button onClick={handleSave} className="text-sm bg-[var(--color-primary)] text-white font-bold px-4 py-1.5 rounded-md hover:opacity-90">添加</button>
+          </div>
+        </div>
+      )}
+
+      <div className="flex-1 overflow-auto border border-[var(--color-border)] rounded-lg">
+        <table className="w-full text-sm border-collapse" style={{ minWidth: 900 }}>
+          <thead className="sticky top-0 z-10">
+            <tr className="bg-[var(--color-surface-container-lowest)] border-b border-[var(--color-border)]">
+              <th className="text-left px-3 py-2.5 text-xs font-bold text-[var(--color-text-tertiary)] uppercase tracking-wider w-40">风格名称</th>
+              <th className="text-left px-3 py-2.5 text-xs font-bold text-[var(--color-text-tertiary)] uppercase tracking-wider">风格描述</th>
+              <th className="text-center px-2 py-2.5 w-20">操作</th>
+            </tr>
+          </thead>
+          <tbody>
+            {styles.map((s, i) => {
+              if (editingIdx === i) {
+                return (
+                  <tr key={i} className="border-b border-[var(--color-border)] bg-[var(--color-primary)]/5">
+                    <td className="px-3 py-2 align-top">
+                      <input value={form.name} onChange={(e) => setForm((p) => ({ ...p, name: e.target.value }))}
+                        className="w-full text-sm bg-[var(--color-surface)] border border-[var(--color-primary)] rounded px-1.5 py-1 text-[var(--color-text-primary)]" />
+                    </td>
+                    <td className="px-3 py-2 align-top">
+                      <textarea value={form.description} onChange={(e) => setForm((p) => ({ ...p, description: e.target.value }))} rows={6}
+                        className="w-full text-sm bg-[var(--color-surface)] border border-[var(--color-primary)] rounded px-1.5 py-1 text-[var(--color-text-primary)] resize-none" />
+                    </td>
+                    <td className="px-2 py-2 text-center align-top">
+                      <div className="flex items-center justify-center gap-1">
+                        <button onClick={handleSave} className="p-1 text-[var(--color-success)] hover:bg-[var(--color-surface-hover)] rounded" title="保存">
+                          <span className="material-symbols-outlined text-sm">check</span>
+                        </button>
+                        <button onClick={cancelEdit} className="p-1 text-[var(--color-text-tertiary)] hover:bg-[var(--color-surface-hover)] rounded" title="取消">
+                          <span className="material-symbols-outlined text-sm">close</span>
+                        </button>
+                      </div>
+                    </td>
+                  </tr>
+                )
+              }
+              return (
+                <tr key={i} className="border-b border-[var(--color-border)] hover:bg-[var(--color-surface-hover)] transition-colors">
+                  <td className="px-3 py-2.5 align-top font-bold text-[var(--color-text-primary)] whitespace-nowrap">{s.name}</td>
+                  <td className="px-3 py-2.5 align-top text-[var(--color-text-secondary)]">
+                    <div className="line-clamp-4 whitespace-pre-line">{s.description}</div>
+                  </td>
+                  <td className="px-2 py-2.5 text-center align-top">
+                    <div className="flex items-center justify-center gap-0.5">
+                      <button onClick={() => startEdit(i)} className="p-1 text-[var(--color-text-tertiary)] hover:text-[var(--color-primary)] hover:bg-[var(--color-surface-hover)] rounded" title="编辑">
+                        <span className="material-symbols-outlined text-sm">edit</span>
+                      </button>
+                      <button onClick={() => { if (confirm(`确定删除"${s.name}"?`)) onRemove(i) }} className="p-1 text-[var(--color-text-tertiary)] hover:text-[var(--color-error)] hover:bg-[var(--color-surface-hover)] rounded" title="删除">
+                        <span className="material-symbols-outlined text-sm">delete</span>
+                      </button>
+                    </div>
+                  </td>
+                </tr>
+              )
+            })}
+          </tbody>
+        </table>
+        {styles.length === 0 && (
+          <div className="text-center py-8 text-[var(--color-text-tertiary)]">
+            <span className="material-symbols-outlined text-3xl block mb-2">brush</span>
+            暂无文笔风格数据
           </div>
         )}
       </div>

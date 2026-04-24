@@ -1,6 +1,7 @@
 import { create } from 'zustand'
 import { persist, createJSONStorage } from 'zustand/middleware'
 import { DEFAULT_GENRES } from '@/data/defaultGenres'
+import { DEFAULT_WRITING_STYLES, type WritingStyleItem } from '@/data/defaultWritingStyles'
 
 type ThemeMode = 'light' | 'dark' | 'system'
 
@@ -39,6 +40,7 @@ interface UIState {
   rightPanelTab: RightPanelTab
   fontGlobal: FontConfig
   genres: GenreItem[]
+  writingStyles: WritingStyleItem[]
   settingsOpen: boolean
   newProjectOpen: boolean
   toasts: Toast[]
@@ -58,6 +60,9 @@ interface UIState {
   addGenre: (genre: GenreItem) => void
   updateGenre: (index: number, genre: GenreItem) => void
   removeGenre: (index: number) => void
+  addWritingStyle: (style: WritingStyleItem) => void
+  updateWritingStyle: (index: number, style: WritingStyleItem) => void
+  removeWritingStyle: (index: number) => void
   addToast: (type: Toast['type'], message: string) => void
   removeToast: (id: string) => void
   setAutoGenerating: (v: boolean) => void
@@ -77,6 +82,7 @@ export const useUIStore = create<UIState>()(
       rightPanelTab: 'context' as RightPanelTab,
       fontGlobal: { fontFamily: 'SimSun', fontSize: 15, lineHeight: 1.8 },
       genres: DEFAULT_GENRES,
+      writingStyles: DEFAULT_WRITING_STYLES,
       settingsOpen: false,
       newProjectOpen: false,
       toasts: [],
@@ -101,6 +107,14 @@ export const useUIStore = create<UIState>()(
         genres: state.genres.filter((_, i) => i !== index),
       })),
 
+      addWritingStyle: (style) => set((state) => ({ writingStyles: [...state.writingStyles, style] })),
+      updateWritingStyle: (index, style) => set((state) => ({
+        writingStyles: state.writingStyles.map((s, i) => i === index ? style : s),
+      })),
+      removeWritingStyle: (index) => set((state) => ({
+        writingStyles: state.writingStyles.filter((_, i) => i !== index),
+      })),
+
       addToast: (type, message) => {
         const id = `toast-${++toastCounter}`
         const x = typeof window !== 'undefined' ? (window as unknown as Record<string, number>).__lastMouseX ?? window.innerWidth - 380 : 100
@@ -121,15 +135,16 @@ export const useUIStore = create<UIState>()(
     {
       name: 'abook-ui',
       storage: createJSONStorage(() => localStorage),
-      version: 5,
+      version: 6,
       migrate: (persistedState: unknown, version: number) => {
         const p = persistedState as Record<string, unknown>
-        if (version < 5) {
+        if (version < 6) {
           const { genres: _oldGenres, ...rest } = p
           return {
             ...rest,
             fontGlobal: rest.fontGlobal || { fontFamily: 'SimSun', fontSize: 15, lineHeight: 1.8 },
             genres: DEFAULT_GENRES,
+            writingStyles: DEFAULT_WRITING_STYLES,
             settingsOpen: false,
           }
         }
@@ -144,6 +159,7 @@ export const useUIStore = create<UIState>()(
         rightPanelTab: state.rightPanelTab,
         fontGlobal: state.fontGlobal,
         genres: state.genres,
+        writingStyles: state.writingStyles,
       }),
     }
   )

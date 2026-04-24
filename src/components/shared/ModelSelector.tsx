@@ -35,10 +35,9 @@ export function ModelSelector() {
             </select>
             <button
               onClick={() => setShowSettings(true)}
-              className="p-1 rounded hover:bg-[var(--color-surface-hover)] text-[var(--color-text-tertiary)]"
-              aria-label="模型设置"
+              className="h-8 px-2 text-xs text-[var(--color-text-tertiary)] hover:text-[var(--color-primary)] hover:bg-[var(--color-surface-hover)] rounded-[var(--radius-sm)] transition-colors whitespace-nowrap"
             >
-              <span className="material-symbols-outlined text-base">settings</span>
+              LLM 模型配置
             </button>
           </>
         )}

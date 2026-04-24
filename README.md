@@ -6,7 +6,7 @@
 
 **AI 驱动的智能小说创作工作室**
 
-[![版本](https://img.shields.io/badge/version-0.1.0-667eea?style=flat-square)](https://github.com/ziwalia/WUMU-AI-Novel-Studio/releases)
+[![版本](https://img.shields.io/badge/version-0.1.2-667eea?style=flat-square)](https://github.com/ziwalia/WUMU-AI-Novel-Studio/releases)
 [![平台](https://img.shields.io/badge/platform-Windows%20%7C%20macOS%20%7C%20Web-764ba2?style=flat-square)]()
 [![许可](https://img.shields.io/badge/license-MIT-green?style=flat-square)](LICENSE)
 [![Tauri](https://img.shields.io/badge/Tauri-v2-24243e?style=flat-square&logo=tauri)](https://tauri.app)

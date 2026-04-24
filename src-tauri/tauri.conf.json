@@ -1,7 +1,7 @@
 {
   "$schema": "https://raw.githubusercontent.com/nicegui/nicegui/main/nicegui/static/tauri-schema-v2.json",
-  "productName": "乌木智书-WUMU AI Novel",
-  "version": "0.1.0",
+  "productName": "WUMU AI Novel",
+  "version": "0.1.2",
   "identifier": "com.ai-novel-studio.desktop",
   "build": {
     "frontendDist": "../dist",

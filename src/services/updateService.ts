@@ -1,4 +1,4 @@
-const GITHUB_REPO = 'ziwal/Abook'
+const GITHUB_REPO = 'ziwalia/WUMU-AI-Novel-Studio'
 const CHECK_INTERVAL = 30 * 60 * 1000 // 30分钟检查一次
 
 let lastCheckTime = 0

@@ -27,3 +27,6 @@ Desktop.ini
 # 日志文件
 *.log
 npm-debug.log*
+
+# 个人文档（不提交到仓库）
+怎么提交版本.md

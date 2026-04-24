@@ -1,4 +1,4 @@
 {
-  "version": "0.1.0",
-  "changelog": "初始版本"
+  "version": "0.1.2",
+  "changelog": "新增版本号显示、版本发布系统、项目README文档"
 }

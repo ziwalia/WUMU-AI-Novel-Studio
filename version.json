@@ -1,4 +1,4 @@
 {
   "version": "0.1.3",
-  "changelog": ""
+  "changelog": "fix:修改设置窗口的大小，LLM模型配置由图标换成文字按钮。"
 }

@@ -55,8 +55,12 @@ export class OpenAIProvider implements LLMProvider {
     const data = await res.json()
     const choice = data.choices?.[0]
 
+    // Handle thinking models: separate reasoning_content from content
+    const msg = choice?.message
+    const content = msg?.content ?? ''
+
     return {
-      content: choice?.message?.content ?? '',
+      content,
       usage: {
         inputTokens: data.usage?.prompt_tokens ?? 0,
         outputTokens: data.usage?.completion_tokens ?? 0,
@@ -88,42 +92,75 @@ export class OpenAIProvider implements LLMProvider {
     const reader = res.body?.getReader()
     if (!reader) throw new Error('无法获取响应流')
 
+    // Check Content-Type: if server returned non-streaming JSON, handle it
+    const contentType = res.headers.get('content-type') ?? ''
+    if (contentType.includes('application/json') && !contentType.includes('text/event-stream')) {
+      console.warn('[chatStream] Server returned JSON instead of SSE, falling back to non-streaming parse')
+      const data = await res.json()
+      const choice = data.choices?.[0]
+      const content = choice?.message?.content ?? ''
+      onChunk(content)
+      return {
+        content,
+        usage: {
+          inputTokens: data.usage?.prompt_tokens ?? 0,
+          outputTokens: data.usage?.completion_tokens ?? 0,
+        },
+      }
+    }
+
     const decoder = new TextDecoder()
     let fullContent = ''
     let inputTokens = 0
     let outputTokens = 0
     let buffer = ''
+    let chunkCount = 0
+    let parseFailCount = 0
+    let contentChunkCount = 0
 
     while (true) {
       const { done, value } = await reader.read()
       if (done) break
 
-      buffer += decoder.decode(value, { stream: true })
+      const rawChunk = decoder.decode(value, { stream: true })
+      buffer += rawChunk
+      chunkCount++
+
       const lines = buffer.split('\n')
       buffer = lines.pop() ?? ''
 
       for (const line of lines) {
         const trimmed = line.trim()
-        if (!trimmed || !trimmed.startsWith('data:')) continue
+        if (!trimmed) continue
+        if (!trimmed.startsWith('data:')) continue
 
         const dataStr = trimmed.slice(5).trim()
         if (dataStr === '[DONE]') continue
 
         try {
           const parsed = JSON.parse(dataStr)
-          const delta = parsed.choices?.[0]?.delta?.content
-          if (delta) {
-            fullContent += delta
-            onChunk(delta)
+          const delta = parsed.choices?.[0]?.delta
+
+          // Only use actual content, skip reasoning_content (Qwen3/DeepSeek thinking tokens)
+          if (delta?.content) {
+            fullContent += delta.content
+            onChunk(delta.content)
+            contentChunkCount++
           }
+
           if (parsed.usage) {
             inputTokens = parsed.usage.prompt_tokens ?? 0
             outputTokens = parsed.usage.completion_tokens ?? 0
           }
         } catch {
-          // skip malformed chunks
+          parseFailCount++
         }
       }
+    }
+
+    console.log(`[chatStream] Done. chunks: ${chunkCount}, content: ${contentChunkCount}, fails: ${parseFailCount}, result: ${fullContent.length} chars`)
+    if (!fullContent && chunkCount > 0) {
+      console.error('[chatStream] No content — model may have only produced reasoning tokens')
     }
 
     return {

@@ -24,6 +24,21 @@ function cleanChapterContent(raw: string): string {
   return raw
 }
 
+/** Ensure all character array fields are at least empty arrays (defensive against old persisted data) */
+function normalizeCharacter(c: Record<string, unknown>): Record<string, unknown> {
+  return {
+    ...c,
+    abilities: Array.isArray(c.abilities) ? c.abilities : [],
+    heldItems: Array.isArray(c.heldItems) ? c.heldItems : [],
+    locationTrajectory: Array.isArray(c.locationTrajectory) ? c.locationTrajectory : [],
+    dialogueKeywords: Array.isArray(c.dialogueKeywords) ? c.dialogueKeywords : [],
+    growthArc: Array.isArray(c.growthArc) ? c.growthArc : [],
+    lifeStatus: c.lifeStatus || 'alive',
+    emotionalArc: c.emotionalArc || '',
+    lastAppearance: typeof c.lastAppearance === 'number' ? c.lastAppearance : -1,
+  }
+}
+
 interface NovelState {
   projects: NovelProject[]
   activeProjectId: string | null
@@ -35,7 +50,7 @@ interface NovelState {
   setChapterStatus: (id: string, chapterIndex: number, status: ChapterStatus) => void
   setCurrentChapter: (id: string, index: number) => void
   setArchitecture: (id: string, content: string) => void
-  setVolumeOutline: (id: string, content: string) => void
+  setNovelOutline: (id: string, content: string) => void
   setBlueprint: (id: string, content: string) => void
   setChapterContent: (id: string, chapterIndex: number, content: string) => void
   setReviewResult: (id: string, chapterIndex: number, content: string) => void
@@ -68,11 +83,12 @@ export const useNovelStore = create<NovelState>()(
           chapterStatuses: {},
           params,
           architecture: '',
-          volumeOutline: '',
+          novelOutline: '',
           blueprint: '',
           chapters: {},
           reviewResults: {},
           reviewRounds: {},
+          chapterHistory: {},
           characters: [],
           relationships: [],
           foreshadowings: [],
@@ -132,10 +148,10 @@ export const useNovelStore = create<NovelState>()(
           ),
         })),
 
-      setVolumeOutline: (id, content) =>
+      setNovelOutline: (id, content) =>
         set((state) => ({
           projects: state.projects.map((p) =>
-            p.id === id ? { ...p, volumeOutline: content, updatedAt: new Date().toISOString() } : p
+            p.id === id ? { ...p, novelOutline: content, updatedAt: new Date().toISOString() } : p
           ),
         })),
 
@@ -153,6 +169,13 @@ export const useNovelStore = create<NovelState>()(
               ? {
                   ...p,
                   chapters: { ...p.chapters, [chapterIndex]: cleanChapterContent(content) },
+                  chapterHistory: {
+                    ...(p.chapterHistory || {}),
+                    [chapterIndex]: [
+                      ...((p.chapterHistory || {})[chapterIndex] || []),
+                      ...(p.chapters[chapterIndex] ? [p.chapters[chapterIndex]] : []),
+                    ].slice(-5),
+                  },
                   updatedAt: new Date().toISOString(),
                 }
               : p
@@ -239,6 +262,7 @@ export const useNovelStore = create<NovelState>()(
                   currentChapterIndex: 0,
                   chapterStatuses: {},
                   architecture: '',
+                  novelOutline: '',
                   volumeOutline: '',
                   blueprint: '',
                   chapters: {},
@@ -267,7 +291,7 @@ export const useNovelStore = create<NovelState>()(
     {
       name: 'abook-novels',
       storage: createJSONStorage(() => localStorage),
-      version: 10,
+      version: 13,
       migrate: (persistedState: unknown, version: number) => {
         const persisted = persistedState as Record<string, unknown>
         if (version < 2) {
@@ -348,6 +372,37 @@ export const useNovelStore = create<NovelState>()(
             ...p,
             fullReview: (p as Record<string, unknown>).fullReview || null,
           }))
+          return { ...persisted, projects }
+        }
+        if (version < 11) {
+          const projects = ((persisted.projects as Record<string, unknown>[]) || []).map((p) => {
+            const params = (p as Record<string, unknown>).params as Record<string, unknown> | undefined
+            return {
+              ...p,
+              novelOutline: (p as Record<string, unknown>).volumeOutline || '',
+              volumeOutline: (p as Record<string, unknown>).volumeOutline || '',
+              params: params ? { ...params } : {},
+            }
+          })
+          return { ...persisted, projects }
+        }
+        if (version < 12) {
+          const projects = ((persisted.projects as Record<string, unknown>[]) || []).map((p) => {
+            return {
+              ...p,
+              chapterHistory: (p as Record<string, unknown>).chapterHistory || {},
+            }
+          })
+          return { ...persisted, projects }
+        }
+        if (version < 13) {
+          const projects = ((persisted.projects as Record<string, unknown>[]) || []).map((p) => {
+            const chars = ((p as Record<string, unknown>).characters as Record<string, unknown>[]) || []
+            return {
+              ...p,
+              characters: chars.map(normalizeCharacter),
+            }
+          })
           return { ...persisted, projects }
         }
         return persisted

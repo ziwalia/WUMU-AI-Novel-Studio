@@ -7,10 +7,11 @@ import type { WizardStep } from '@/types'
 import { StepRenderer } from './StepRenderer'
 import { Button } from '@/components/shared/Button'
 import { ModelSelector } from '@/components/shared/ModelSelector'
+import { ErrorBoundary } from '@/components/shared/ErrorBoundary'
 
-const STEP_REQUIREMENTS: Partial<Record<WizardStep, (project: { architecture: string; volumeOutline: string; blueprint: string; chapters: Record<number, string> }, chapterIdx: number) => string | null>> = {
+const STEP_REQUIREMENTS: Partial<Record<WizardStep, (project: { architecture: string; novelOutline: string; blueprint: string; chapters: Record<number, string> }, chapterIdx: number) => string | null>> = {
   'architecture': (p) => !p.architecture ? '请先生成小说架构' : null,
-  'volume': (p) => !p.volumeOutline ? '请先生成分卷大纲' : null,
+  'outline': (p) => !p.novelOutline ? '请先生成小说大纲' : null,
   'blueprint': (p) => !p.blueprint ? '请先生成章节目录' : null,
   'draft': (p, idx) => !p.chapters[idx] ? '请先生成当前章节草稿' : null,
 }
@@ -99,7 +100,7 @@ export function WizardShell() {
     if (isStreaming) return null
     switch (project.currentStep) {
       case 'architecture': return project.architecture?.length || null
-      case 'volume': return project.volumeOutline?.length || null
+      case 'outline': return project.novelOutline?.length || null
       case 'blueprint': return project.blueprint?.length || null
       case 'draft': return project.chapters[project.currentChapterIndex]?.length || null
       case 'review': return project.reviewResults[project.currentChapterIndex]?.length || null
@@ -172,7 +173,9 @@ export function WizardShell() {
 
       {/* Main content */}
       <div className="flex-1 overflow-y-auto p-6">
-        <StepRenderer step={project.currentStep} />
+        <ErrorBoundary>
+          <StepRenderer step={project.currentStep} />
+        </ErrorBoundary>
       </div>
 
       {/* Action bar */}

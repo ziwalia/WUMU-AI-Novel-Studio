@@ -22,10 +22,11 @@ export function NewProjectDialog() {
     useNovelStore.getState().createProject(name.trim(), '', {
       topic: '',
       genre: '',
-      volumeCount: 1,
       chapterCount: 10,
       wordsPerChapter: 3000,
       strictWordCount: false,
+      storyPremise: '',
+      narrativePerspective: '第三人称有限视角（聚焦第一角色）',
       userGuidance: '',
       coreCharacters: '',
       keyItems: '',

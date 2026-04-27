@@ -2,13 +2,18 @@ import { useNovelStore } from '@/stores/novelStore'
 import { useSessionStore } from '@/stores/sessionStore'
 import { useUIStore } from '@/stores/uiStore'
 import { useLLMStore } from '@/stores/llmStore'
-import { setCharacters, setRelationships, createCharacter, addCharacter, updateCharacter, addRelationship, addForeshadowing, resolveForeshadowing, updateChapterMeta, saveCharacterSnapshot, restoreCharacterSnapshot } from '@/stores/characterStore'
+import { createCharacter, addCharacter, updateCharacter, addRelationship, updateRelationship, addForeshadowing, resolveForeshadowing, updateChapterMeta, saveCharacterSnapshot, restoreCharacterSnapshot } from '@/stores/characterStore'
+import { parseJsonFromLLM } from '@/lib/extractJson'
 import { chatStream, chat } from '@/services/llm'
+import { extractArchData } from '@/services/extractArchData'
+import { extractOutlineData } from '@/services/extractOutlineData'
 import {
   buildSystemPrompt,
   architecturePrompt,
-  volumeOutlinePrompt,
+  novelOutlinePrompt,
   blueprintPrompt,
+  blueprintDedupPrompt,
+  blueprintDedupRewritePrompt,
   draftPrompt,
   reviewPrompt,
   rewritePrompt,
@@ -92,17 +97,7 @@ function switchStep(step: string) {
   }
 }
 
-// --- Extract helpers (simplified versions for auto mode) ---
-
-type RawCharEntry = {
-  name: string
-  role?: string
-  age?: string
-  personality?: string
-  abilities?: string[]
-  description?: string
-  basicInfo?: string
-}
+// --- Extract helpers for per-chapter character changes ---
 
 function ensureAbilities(v: unknown): string[] {
   if (Array.isArray(v)) return v.map(String)
@@ -113,175 +108,15 @@ function ensureAbilities(v: unknown): string[] {
 function parseRoleToWeight(role?: string): CharacterWeight {
   if (!role) return 'supporting'
   const r = role.toLowerCase()
-  if (r.includes('主角') || r.includes('主人公')) return 'protagonist'
-  if (r.includes('女主') || r.includes('男主角')) return 'protagonist'
+  if (r.includes('主角') || r.includes('主人公') || r.includes('女主') || r.includes('男主角')) return 'protagonist'
   if (r.includes('重要') || r.includes('主要') || r.includes('核心')) return 'major'
   return 'supporting'
-}
-
-function extractCharactersFromArch(raw: string) {
-  try {
-    const jsonMatch = raw.match(/```json\s*([\s\S]*?)\s*```/)
-    const rawJson = jsonMatch?.[1] ?? raw
-    const parsed = JSON.parse(rawJson)
-    if (!parsed || typeof parsed !== 'object') return
-
-    const charsSection = parsed.characters
-    if (!charsSection) return
-
-    let characters: Character[] = []
-    if (Array.isArray(charsSection)) {
-      characters = (charsSection as RawCharEntry[]).map((c) =>
-        createCharacter({
-          name: c.name,
-          weight: parseRoleToWeight(c.role),
-          age: c.age || '',
-          personality: c.personality || '',
-          abilities: ensureAbilities(c.abilities),
-          basicInfo: c.description || c.basicInfo || '',
-        })
-      )
-    } else if (typeof charsSection === 'object') {
-      const entries = Object.entries(charsSection).map(([k, v]) => ({
-        name: k,
-        ...(typeof v === 'object' && v !== null ? v as Record<string, unknown> : { description: String(v) }),
-      }))
-      characters = (entries as RawCharEntry[]).map((c) =>
-        createCharacter({
-          name: c.name,
-          weight: parseRoleToWeight(c.role),
-          age: c.age || '',
-          personality: c.personality || '',
-          abilities: ensureAbilities(c.abilities),
-          basicInfo: c.description || c.basicInfo || '',
-        })
-      )
-    }
-
-    if (characters.length > 0) setCharacters(characters)
-
-    // Extract relationships
-    const relSection = parsed.relationships
-    if (relSection && Array.isArray(relSection)) {
-      const names = new Set(characters.map((c) => c.name))
-      if (names.size === 0) {
-        const existing = getProject()
-        existing?.characters.forEach((c) => names.add(c.name))
-      }
-      const relationships: import('@/types').CharacterRelationship[] = []
-      for (const rel of relSection as Array<{ from: string; to: string; type: string; description: string }>) {
-        if (rel.from && rel.to) {
-          relationships.push({
-            id: `rel-${Date.now()}-${Math.random().toString(36).slice(2, 5)}`,
-            from: rel.from,
-            to: rel.to,
-            type: REL_TYPE_MAP[rel.type] || '其他' as RelationshipType,
-            description: rel.description || '',
-          })
-        }
-      }
-      if (relationships.length > 0) setRelationships(relationships)
-    }
-  } catch {
-    // silently ignore
-  }
-}
-
-type CharChange = {
-  name: string
-  type: 'status_update' | 'new_character'
-  changes: {
-    role?: string
-    age?: string
-    personality?: string
-    abilities?: string[]
-    description?: string
-    basicInfo?: string
-    location?: string
-    status?: string
-  }
-}
-
-type RelChange = {
-  from: string
-  to: string
-  action: 'add' | 'change'
-  type: string
-  description: string
 }
 
 const REL_TYPE_MAP: Record<string, RelationshipType> = {
   '师徒': '师徒', '夫妻': '亲人', '情侣': '恋人', '父子': '亲人', '父女': '亲人',
   '母子': '亲人', '母女': '亲人', '兄弟': '亲人', '姐妹': '亲人', '朋友': '朋友',
   '盟友': '盟友', '对手': '敌对', '仇敌': '敌对', '主仆': '其他', '同门': '同门',
-}
-
-function extractCharChangesFromContent(raw: string, chapterIndex: number) {
-  try {
-    const annotationMatch = raw.match(/\[角色变化\]([\s\S]*?)\[\/角色变化\]/)
-    if (!annotationMatch) return
-    const parsed = JSON.parse(annotationMatch[1]!)
-    if (!parsed) return
-
-    const project = getProject()
-    if (!project) return
-
-    const existingChars = project.characters
-    const existingRels = project.relationships
-    const charNameMap = new Map(existingChars.map((c) => [c.name, c]))
-
-    if (parsed.characterChanges && Array.isArray(parsed.characterChanges)) {
-      for (const change of parsed.characterChanges as CharChange[]) {
-        if (!change.name || !change.changes) continue
-        if (change.type === 'new_character') {
-          if (!charNameMap.has(change.name)) {
-            addCharacter(createCharacter({
-              name: change.name,
-              weight: change.changes.role ? parseRoleToWeight(change.changes.role) : 'supporting',
-              age: change.changes.age || '',
-              personality: change.changes.personality || '',
-              abilities: change.changes.abilities || [],
-              basicInfo: change.changes.description || '',
-            }))
-          }
-        } else if (change.type === 'status_update') {
-          const existing = charNameMap.get(change.name)
-          if (existing) {
-            const updates: Partial<Character> = {}
-            const c = change.changes
-            if (c.age) updates.age = c.age
-            if (c.personality) updates.personality = c.personality
-            if (c.abilities) {
-              const abs = ensureAbilities(c.abilities)
-              if (abs.length > 0) updates.abilities = abs
-            }
-            if (c.basicInfo) updates.basicInfo = c.basicInfo
-            if (c.location) updates.locationTrajectory = [...(existing.locationTrajectory || []), c.location]
-            if (c.status === 'dead' || c.status === 'alive') updates.lifeStatus = c.status as 'alive' | 'dead'
-            updates.lastAppearance = chapterIndex
-            if (Object.keys(updates).length > 0) updateCharacter(existing.id, updates)
-          }
-        }
-      }
-    }
-
-    if (parsed.relationshipChanges && Array.isArray(parsed.relationshipChanges)) {
-      for (const rc of parsed.relationshipChanges as RelChange[]) {
-        if (!rc.from || !rc.to) continue
-        if (rc.action === 'add') {
-          const relType = REL_TYPE_MAP[rc.type] || '其他'
-          const exists = existingRels.find(
-            (r) => (r.from === rc.from && r.to === rc.to) || (r.from === rc.to && r.to === rc.from)
-          )
-          if (!exists) {
-            addRelationship({ from: rc.from, to: rc.to, type: relType, description: rc.description || '' })
-          }
-        }
-      }
-    }
-  } catch {
-    // silently ignore
-  }
 }
 
 async function extractChapterMeta(chapterIndex: number, chapterContent: string) {
@@ -301,21 +136,78 @@ async function extractChapterMeta(chapterIndex: number, chapterContent: string) 
 
   try {
     const result = await chat(config, messages)
-    const jsonMatch = result.content.match(/```json\s*([\s\S]*?)\s*```/)
-    const rawJson = jsonMatch?.[1] ?? result.content
-    const parsed = JSON.parse(rawJson)
+    const parsed = parseJsonFromLLM<Record<string, unknown>>(result.content)
+    if (!parsed) return
 
     const metaUpdates: Partial<import('@/types').ChapterMeta> = {}
     if (parsed.summary && typeof parsed.summary === 'string') metaUpdates.summary = parsed.summary
     if (parsed.timeline && typeof parsed.timeline === 'string') metaUpdates.timeline = parsed.timeline
+    if (Array.isArray(parsed.sceneTypes)) metaUpdates.sceneTypes = parsed.sceneTypes
+    if (parsed.pacingTag && ['tension', 'calm', 'transition'].includes(parsed.pacingTag as string)) {
+      metaUpdates.pacingTag = parsed.pacingTag as 'tension' | 'calm' | 'transition'
+    }
+    if (parsed.emotionIntensity && ['high', 'medium', 'low'].includes(parsed.emotionIntensity as string)) {
+      metaUpdates.emotionIntensity = parsed.emotionIntensity as 'high' | 'medium' | 'low'
+    }
     if (Object.keys(metaUpdates).length > 0) updateChapterMeta(chapterIndex, metaUpdates)
 
+    // Apply character and relationship changes
+    if (Array.isArray(parsed.characterChanges) || Array.isArray(parsed.relationshipChanges)) {
+      const charNameMap = new Map(project.characters.map((c) => [c.name, c]))
+      for (const change of (Array.isArray(parsed.characterChanges) ? parsed.characterChanges : []) as { name: string; type: string; changes: Record<string, unknown> }[]) {
+        if (!change.name || !change.changes) continue
+        if (change.type === 'new_character') {
+          if (!charNameMap.has(change.name)) {
+            const nc = createCharacter({
+              name: change.name,
+              weight: parseRoleToWeight(change.changes.role as string),
+              age: (change.changes.age as string) || '',
+              personality: (change.changes.personality as string) || '',
+              abilities: ensureAbilities(change.changes.abilities),
+              basicInfo: (change.changes.description as string) || '',
+            })
+            addCharacter(nc)
+            charNameMap.set(change.name, nc)
+          }
+        } else if (change.type === 'status_update') {
+          const existing = charNameMap.get(change.name)
+          if (existing) {
+            const updates: Partial<Character> = { lastAppearance: chapterIndex }
+            const c = change.changes
+            if (c.age) updates.age = c.age as string
+            if (c.personality) updates.personality = c.personality as string
+            if (c.abilities) { const abs = ensureAbilities(c.abilities); if (abs.length > 0) updates.abilities = abs }
+            if (c.basicInfo) updates.basicInfo = c.basicInfo as string
+            if (c.location) updates.locationTrajectory = [...(existing.locationTrajectory || []), c.location as string]
+            if (c.status === 'dead' || c.status === 'alive') updates.lifeStatus = c.status as 'alive' | 'dead'
+            if (Object.keys(updates).length > 1) updateCharacter(existing.id, updates)
+          }
+        }
+      }
+      for (const rc of (Array.isArray(parsed.relationshipChanges) ? parsed.relationshipChanges : []) as { from: string; to: string; action: string; type: string; description?: string }[]) {
+        if (!rc.from || !rc.to) continue
+        const relType = REL_TYPE_MAP[rc.type] || ('其他' as RelationshipType)
+        if (rc.action === 'add') {
+          const exists = project.relationships.find(
+            (r) => (r.from === rc.from && r.to === rc.to) || (r.from === rc.to && r.to === rc.from),
+          )
+          if (!exists) addRelationship({ from: rc.from, to: rc.to, type: relType, description: rc.description || '' })
+        } else if (rc.action === 'change') {
+          const existing = project.relationships.find(
+            (r) => (r.from === rc.from && r.to === rc.to) || (r.from === rc.to && r.to === rc.from),
+          )
+          if (existing) updateRelationship(existing.id, { type: relType, ...(rc.description ? { description: rc.description } : {}) })
+        }
+      }
+    }
+
     if (Array.isArray(parsed.foreshadowingPlanted)) {
-      for (const fs of parsed.foreshadowingPlanted) {
+      for (const fs of parsed.foreshadowingPlanted as { type?: string; content?: string }[]) {
+        if (!fs.content) continue
         addForeshadowing({
           id: `fs-auto-${Date.now()}-${Math.random().toString(36).slice(2, 5)}`,
-          type: fs.type || '伏笔',
-          content: fs.content || '',
+          type: (fs.type as import('@/types').ForeshadowingType) || 'SF',
+          content: fs.content,
           status: 'planted',
           plantedChapter: chapterIndex,
           resolvedChapter: -1,
@@ -324,8 +216,34 @@ async function extractChapterMeta(chapterIndex: number, chapterContent: string) 
       }
     }
     if (Array.isArray(parsed.foreshadowingResolved)) {
-      for (const fs of parsed.foreshadowingResolved) {
-        if (fs.id) resolveForeshadowing(fs.id, chapterIndex)
+      for (const resolvedContent of parsed.foreshadowingResolved) {
+        if (typeof resolvedContent !== 'string') continue
+        const match = project.foreshadowings.find(
+          (f) => f.status === 'planted' && (
+            f.content === resolvedContent ||
+            f.content.includes(resolvedContent) ||
+            resolvedContent.includes(f.content)
+          ),
+        )
+        if (match) resolveForeshadowing(match.id, chapterIndex)
+      }
+    }
+
+    // Auto-update runningSummary: concatenate all chapter summaries up to this point
+    if (parsed.summary && typeof parsed.summary === 'string') {
+      const p = getProject()
+      const aid = useNovelStore.getState().activeProjectId
+      if (p && aid) {
+        const parts: string[] = []
+        for (let i = 0; i <= chapterIndex; i++) {
+          const meta = i === chapterIndex
+            ? { ...p.chapterMetas[i], summary: parsed.summary as string }
+            : p.chapterMetas[i]
+          if (meta?.summary) parts.push(`第${i + 1}章：${meta.summary}`)
+        }
+        const newRunning = parts.join('\n')
+        useNovelStore.getState().setRunningSummary(aid, newRunning)
+        updateChapterMeta(chapterIndex, { runningSummarySnapshot: newRunning })
       }
     }
   } catch {
@@ -333,88 +251,6 @@ async function extractChapterMeta(chapterIndex: number, chapterContent: string) 
   }
 }
 
-function extractBulkCharChanges(raw: string) {
-  try {
-    const jsonMatch = raw.match(/```json\s*([\s\S]*?)\s*```/)
-    const rawJson = jsonMatch?.[1] ?? raw
-    const parsed = JSON.parse(rawJson)
-    if (!Array.isArray(parsed)) return
-
-    const project = getProject()
-    if (!project) return
-
-    const existingChars = project.characters
-    const existingRels = project.relationships
-    const charNameMap = new Map(existingChars.map((c) => [c.name, c]))
-    const newChars: Character[] = []
-    const charUpdates = new Map<string, Partial<Character>>()
-    const newRels: import('@/types').CharacterRelationship[] = []
-    let relCounter = Date.now()
-
-    for (const entry of parsed) {
-      if (entry.characterChanges && Array.isArray(entry.characterChanges)) {
-        for (const change of entry.characterChanges as CharChange[]) {
-          if (!change.name || !change.changes) continue
-          if (change.type === 'new_character') {
-            if (!charNameMap.has(change.name) && !newChars.find((c) => c.name === change.name)) {
-              newChars.push(createCharacter({
-                name: change.name,
-                weight: change.changes.role ? parseRoleToWeight(change.changes.role) : 'supporting',
-                age: change.changes.age || '',
-                personality: change.changes.personality || '',
-                abilities: change.changes.abilities || [],
-                basicInfo: change.changes.description || '',
-              }))
-            }
-          } else if (change.type === 'status_update') {
-            const existing = charNameMap.get(change.name)
-            if (existing) {
-              const prev = charUpdates.get(change.name) || {}
-              const c = change.changes
-              if (c.age) prev.age = c.age
-              if (c.personality) prev.personality = c.personality
-              if (c.abilities) {
-                const abs = ensureAbilities(c.abilities)
-                if (abs.length > 0) prev.abilities = abs
-              }
-              if (c.basicInfo) prev.basicInfo = c.basicInfo
-              if (c.location) prev.locationTrajectory = [...(existing.locationTrajectory || []), c.location]
-              if (c.status === 'dead' || c.status === 'alive') prev.lifeStatus = c.status as 'alive' | 'dead'
-              charUpdates.set(change.name, prev)
-            }
-          }
-        }
-      }
-
-      if (entry.relationshipChanges && Array.isArray(entry.relationshipChanges)) {
-        for (const rc of entry.relationshipChanges as RelChange[]) {
-          if (!rc.from || !rc.to) continue
-          const relType = REL_TYPE_MAP[rc.type] || '其他'
-          if (rc.action === 'add') {
-            const exists = existingRels.find(
-              (r) => (r.from === rc.from && r.to === rc.to) || (r.from === rc.to && r.to === rc.from)
-            )
-            if (!exists && !newRels.find((r) => r.from === rc.from && r.to === rc.to)) {
-              newRels.push({
-                id: `rel-${++relCounter}-${Math.random().toString(36).slice(2, 5)}`,
-                from: rc.from, to: rc.to, type: relType, description: rc.description || '',
-              })
-            }
-          }
-        }
-      }
-    }
-
-    for (const nc of newChars) addCharacter(nc)
-    for (const [name, updates] of charUpdates) {
-      const char = charNameMap.get(name)
-      if (char) updateCharacter(char.id, updates)
-    }
-    for (const nr of newRels) addRelationship(nr)
-  } catch {
-    // silently ignore
-  }
-}
 
 // --- Full review is handled by UI (FullReviewDialog) via autoFullReviewPending flag ---
 
@@ -426,6 +262,7 @@ export async function runAutoGeneration(autoConfig: AutoGenConfig): Promise<void
   if (!activeProjectId) throw new Error('没有活跃项目')
 
   const addToast = useUIStore.getState().addToast
+  const setDedupStatus = useUIStore.getState().setDedupStatus
   const genres = useUIStore.getState().genres
 
   // Step 1: Architecture
@@ -434,26 +271,28 @@ export async function runAutoGeneration(autoConfig: AutoGenConfig): Promise<void
   addToast('info', '正在生成小说架构...')
   {
     const project = getProject()!
+    const chars = project.characters.map((c) => ({ name: c.name, weight: c.weight, age: c.age, personality: c.personality, abilities: c.abilities, basicInfo: c.basicInfo }))
+    const rels = project.relationships.map((r) => ({ from: r.from, to: r.to, type: r.type, description: r.description }))
     const messages: Message[] = [
       { role: 'system', content: buildSystemPrompt() },
-      { role: 'user', content: architecturePrompt(project.params, genres) },
+      { role: 'user', content: architecturePrompt(project.params, genres, chars.length > 0 ? chars : undefined, rels.length > 0 ? rels : undefined) },
     ]
     const content = await streamGenerate(messages)
     useNovelStore.getState().setArchitecture(activeProjectId, content)
-    extractCharactersFromArch(content)
+    extractArchData(content)
   }
 
-  // Step 2: Volume Outline
+  // Step 2: Novel Outline
   checkAbort()
-  switchStep('volume')
-  addToast('info', '正在生成分卷大纲...')
+  switchStep('outline')
+  addToast('info', '正在生成小说大纲...')
   {
     const project = getProject()!
     const messages: Message[] = [
       { role: 'system', content: buildSystemPrompt() },
       {
         role: 'user',
-        content: volumeOutlinePrompt(
+        content: novelOutlinePrompt(
           project.params,
           project.architecture,
           genres,
@@ -463,8 +302,8 @@ export async function runAutoGeneration(autoConfig: AutoGenConfig): Promise<void
       },
     ]
     const content = await streamGenerate(messages)
-    useNovelStore.getState().setVolumeOutline(activeProjectId, content)
-    extractBulkCharChanges(content)
+    useNovelStore.getState().setNovelOutline(activeProjectId, content)
+    extractOutlineData(content)
   }
 
   // Step 3: Blueprint
@@ -479,7 +318,7 @@ export async function runAutoGeneration(autoConfig: AutoGenConfig): Promise<void
         role: 'user',
         content: blueprintPrompt(
           project.params,
-          project.volumeOutline,
+          project.novelOutline,
           genres,
           project.characters.map((c) => ({ name: c.name, weight: c.weight, age: c.age, personality: c.personality, abilities: c.abilities, basicInfo: c.basicInfo })),
           project.relationships.map((r) => ({ from: r.from, to: r.to, type: r.type, description: r.description })),
@@ -487,17 +326,140 @@ export async function runAutoGeneration(autoConfig: AutoGenConfig): Promise<void
       },
     ]
     const content = await streamGenerate(messages)
-    useNovelStore.getState().setBlueprint(activeProjectId, content)
-    extractBulkCharChanges(content)
+    // Normalize blueprint: extract clean JSON before storing
+    const bpClean = parseJsonFromLLM<{ chapterIndex: number; title: string; summary: string }[]>(content)
+    const blueprintToStore = bpClean ? JSON.stringify(bpClean, null, 2) : content
+    useNovelStore.getState().setBlueprint(activeProjectId, blueprintToStore)
+    extractOutlineData(blueprintToStore)
     saveCharacterSnapshot(0)
+
+    // Auto dedup check + rewrite loop (max 5 rounds)
+    const MAX_DEDUP_ROUNDS = 5
+    for (let round = 0; round < MAX_DEDUP_ROUNDS; round++) {
+      checkAbort()
+      const bpProject = getProject()!
+      const bpRaw = bpProject.blueprint
+      const bpParsed = parseJsonFromLLM<{ chapterIndex: number; title: string; summary: string }[]>(bpRaw)
+      console.log(`[AutoGen] Dedup round ${round + 1}, bpRaw length: ${bpRaw.length}, bpParsed:`, bpParsed ? `ok (${bpParsed.length} chapters)` : 'null')
+      if (!bpParsed || bpParsed.length < 2) {
+        console.warn('[AutoGen] Blueprint parse failed or too few chapters, skipping dedup loop. Raw preview:', bpRaw.slice(0, 200))
+        break
+      }
+
+      addToast('info', `去重检测中（第${round + 1}轮）...`)
+      setDedupStatus(`🔍 第${round + 1}轮检测中...`)
+      const config = useLLMStore.getState().getActiveConfig()
+      if (!config) break
+
+      // Run dedup check
+      const dedupMsgs: Message[] = [
+        { role: 'system', content: buildSystemPrompt() },
+        { role: 'user', content: blueprintDedupPrompt(bpParsed) },
+      ]
+      const dedupResult = await chat(config, dedupMsgs)
+      const dedup = parseJsonFromLLM<{ duplicateGroups: { chapters: number[]; reason: string; suggestion: string }[]; overallScore: number; summary: string }>(dedupResult.content)
+      if (!dedup || dedup.overallScore >= 9 || dedup.duplicateGroups.length === 0) {
+        if (dedup && dedup.overallScore >= 9) {
+          addToast('success', `去重检测通过（${dedup.overallScore}/10）`)
+          setDedupStatus(`✅ 检测通过（${dedup.overallScore}/10）`)
+        }
+        break
+      }
+
+      addToast('info', `去重评分 ${dedup.overallScore}/10，自动重写雷同章节中...`)
+      setDedupStatus(`⚠️ 评分 ${dedup.overallScore}/10，正在重写...`)
+
+      // Compute explicit rewrite targets: keep first chapter per group, rewrite the rest
+      const bpChapterMap = new Map(bpParsed.map((c) => [c.chapterIndex, c]))
+      const bpTargets: { chapterIndex: number; currentTitle: string; currentSummary: string; reason: string; suggestion: string }[] = []
+      for (const group of dedup.duplicateGroups) {
+        const sorted = [...group.chapters].sort((a, b) => a - b)
+        for (let gi = 1; gi < sorted.length; gi++) {
+          const chNum = sorted[gi]!
+          const idx = chNum - 1
+          const existing = bpChapterMap.get(idx)
+          if (existing) {
+            bpTargets.push({
+              chapterIndex: idx,
+              currentTitle: existing.title,
+              currentSummary: existing.summary,
+              reason: group.reason,
+              suggestion: group.suggestion,
+            })
+          }
+        }
+      }
+      if (bpTargets.length === 0) break
+
+      // Rewrite duplicates
+      const rewriteMsgs: Message[] = [
+        { role: 'system', content: buildSystemPrompt() },
+        { role: 'user', content: blueprintDedupRewritePrompt(bpParsed, bpTargets) },
+      ]
+      const rewriteResult = await chat(config, rewriteMsgs)
+      const rewrites = parseJsonFromLLM<{ chapterIndex: number; title: string; summary: string }[]>(rewriteResult.content)
+      if (!rewrites || !Array.isArray(rewrites) || rewrites.length === 0) break
+
+      // Apply rewrites only to target chapters, reject duplicate titles
+      const rewriteMap = new Map(rewrites.map((r) => [r.chapterIndex, r]))
+      const existingTitles = new Set(bpParsed.map((c) => c.title))
+      for (const target of bpTargets) {
+        const rw = rewriteMap.get(target.chapterIndex) || rewriteMap.get(target.chapterIndex + 1)
+        if (!rw?.title || !rw.summary) continue
+        if (existingTitles.has(rw.title) && rw.title !== target.currentTitle) continue
+        const ch = bpParsed.find((c) => c.chapterIndex === target.chapterIndex)
+        if (ch) {
+          existingTitles.delete(ch.title)
+          ch.title = rw.title
+          ch.summary = rw.summary
+          existingTitles.add(rw.title)
+        }
+      }
+
+      const newBlueprint = JSON.stringify(bpParsed, null, 2)
+      useNovelStore.getState().setBlueprint(activeProjectId, newBlueprint)
+      extractOutlineData(newBlueprint)
+
+      // Final check on last round
+      if (round === MAX_DEDUP_ROUNDS - 1) {
+        addToast('warning', `去重重写已达${MAX_DEDUP_ROUNDS}轮上限，继续生成`)
+        setDedupStatus(`⚠️ 已达${MAX_DEDUP_ROUNDS}轮上限，继续生成`)
+      }
+    }
   }
 
   // Steps 4-7: Per-chapter loop (Draft → Review × N → Rewrite × N → Finalize)
+  setDedupStatus(null)
   const project = getProject()!
   const totalChapters = project.params.chapterCount
 
-  for (let chapterIdx = 0; chapterIdx < totalChapters; chapterIdx++) {
+  // Resume from checkpoint: skip already-finalized chapters
+  const savedProgress = useUIStore.getState().autoProgress
+  let startChapter = 0
+  if (savedProgress && savedProgress.chapterIdx > 0) {
+    const latestProject = getProject()!
+    // Check if earlier chapters are already finalized
+    let canResume = true
+    for (let i = 0; i < savedProgress.chapterIdx; i++) {
+      if (!latestProject.chapters[i] || latestProject.chapterStatuses[i] !== 'finalized') {
+        canResume = false
+        break
+      }
+    }
+    if (canResume) {
+      startChapter = savedProgress.chapterIdx
+      addToast('info', `从第 ${startChapter + 1} 章断点续传...`)
+    } else {
+      addToast('info', '前置章节不完整，从头开始生成')
+    }
+    useUIStore.getState().setAutoProgress(null)
+  }
+
+  for (let chapterIdx = startChapter; chapterIdx < totalChapters; chapterIdx++) {
     checkAbort()
+
+    // Save checkpoint before each chapter
+    useUIStore.getState().setAutoProgress({ chapterIdx, phase: 'draft' })
 
     // Switch to chapter
     useNovelStore.getState().setCurrentChapter(activeProjectId, chapterIdx)
@@ -538,16 +500,44 @@ export async function runAutoGeneration(autoConfig: AutoGenConfig): Promise<void
       }
       if (endings.length > 0) draftCtx.prevChapterEndings = endings
 
+      // Full text of previous 2 chapters
+      if (chapterIdx > 0 && p.chapters[chapterIdx - 1]) {
+        draftCtx.prevFullChapter = p.chapters[chapterIdx - 1]
+      }
+      if (chapterIdx > 1 && p.chapters[chapterIdx - 2]) {
+        draftCtx.prevPrevFullChapter = p.chapters[chapterIdx - 2]
+      }
+
+      // Recent scene types (last 5 chapters, skip for first chapter)
+      if (chapterIdx > 0) {
+        const sceneInfo = []
+        for (let i = Math.max(0, chapterIdx - 5); i < chapterIdx; i++) {
+          const meta = p.chapterMetas[i]
+          if (meta?.sceneTypes && meta.sceneTypes.length > 0) {
+            sceneInfo.push({
+              chapterIndex: i,
+              sceneTypes: meta.sceneTypes,
+              pacingTag: meta.pacingTag || 'transition',
+              emotionIntensity: meta.emotionIntensity || 'medium',
+            })
+          }
+        }
+        if (sceneInfo.length > 0) draftCtx.recentSceneTypes = sceneInfo
+      }
+
       const recentChars = p.characters.filter(
         (c) => c.weight === 'protagonist' || (c.lastAppearance >= 0 && c.lastAppearance >= chapterIdx - 3)
       )
       if (recentChars.length > 0) {
-        draftCtx.activeCharacters = recentChars.map((c) => ({
-          name: c.name,
-          status: c.lifeStatus === 'alive' ? '存活' : c.lifeStatus === 'dead' ? '已死亡' : '未知',
-          location: c.locationTrajectory.length > 0 ? c.locationTrajectory[c.locationTrajectory.length - 1]! : '未知',
-          emotion: c.emotionalArc || '正常',
-        }))
+        draftCtx.activeCharacters = recentChars.map((c) => {
+          const loc = (c.locationTrajectory || [])
+          return {
+            name: c.name,
+            status: c.lifeStatus === 'alive' ? '存活' : c.lifeStatus === 'dead' ? '已死亡' : '未知',
+            location: loc.length > 0 ? loc[loc.length - 1]! : '未知',
+            emotion: c.emotionalArc || '正常',
+          }
+        })
       }
 
       const openFs = p.foreshadowings.filter((f) => f.status === 'planted')
@@ -583,7 +573,7 @@ export async function runAutoGeneration(autoConfig: AutoGenConfig): Promise<void
       const content = await streamGenerate(messages)
       useNovelStore.getState().setChapterContent(activeProjectId, chapterIdx, content)
       useNovelStore.getState().setChapterStatus(activeProjectId, chapterIdx, 'draft')
-      extractCharChangesFromContent(content, chapterIdx)
+      saveCharacterSnapshot(chapterIdx)
       if (chapterIdx + 1 < totalChapters) saveCharacterSnapshot(chapterIdx + 1)
       // Background meta extraction (don't await to speed up)
       extractChapterMeta(chapterIdx, content)
@@ -608,9 +598,31 @@ export async function runAutoGeneration(autoConfig: AutoGenConfig): Promise<void
           .map((f) => `[${f.type}] 第${f.plantedChapter + 1}章埋: ${f.content}`)
           .join('\n')
 
+        // Full character data with status and location
         const charSummary = p.characters.length > 0
-          ? p.characters.map((c) => `${c.name}(${c.weight}): ${c.basicInfo}`).join('\n')
+          ? p.characters.map((c) => {
+              const status = c.lifeStatus === 'dead' ? '【已死亡】' : c.lifeStatus === 'alive' ? '【存活】' : ''
+              const cLoc = (c.locationTrajectory || [])
+              const loc = cLoc.length > 0 ? `当前位置：${cLoc[cLoc.length - 1]}` : ''
+              return `- ${c.name}（${c.weight}）${status}：年龄${c.age || '未知'}，性格：${c.personality || '未知'}，能力：${(c.abilities || []).join('、') || '无'}。${c.basicInfo || ''}${loc ? '，' + loc : ''}`
+            }).join('\n')
           : p.params.coreCharacters
+
+        const relSummary = p.relationships.length > 0
+          ? p.relationships.map((r) => `- ${r.from} ←${r.type}→ ${r.to}${r.description ? `：${r.description}` : ''}`).join('\n')
+          : undefined
+
+        // Blueprint chapter for plan-checking
+        let blueprintChapter: { title: string; summary: string } | undefined
+        if (p.blueprint) {
+          try {
+            const bp = JSON.parse(p.blueprint)
+            if (Array.isArray(bp)) {
+              const ch = bp.find((c: Record<string, unknown>) => c.chapterIndex === chapterIdx)
+              if (ch) blueprintChapter = { title: String(ch.title), summary: String(ch.summary) }
+            }
+          } catch { /* ignore */ }
+        }
 
         const continuityContext: Parameters<typeof reviewPrompt>[3] = {}
         const reviewSnap = chapterIdx > 0 ? p.chapterMetas?.[chapterIdx - 1]?.runningSummarySnapshot : undefined
@@ -628,12 +640,26 @@ export async function runAutoGeneration(autoConfig: AutoGenConfig): Promise<void
           {
             role: 'user',
             content: reviewPrompt(chapterContent, charSummary, openFs || undefined,
-              Object.keys(continuityContext).length > 0 ? continuityContext : undefined),
+              Object.keys(continuityContext).length > 0 ? continuityContext : undefined,
+              { blueprintChapter, relationships: relSummary }),
           },
         ]
 
         const content = await streamGenerate(messages)
         useNovelStore.getState().setReviewResult(activeProjectId, chapterIdx, content)
+
+        // Quality gate: parse review score
+        const reviewParsed = parseJsonFromLLM<{ overallScore: number; summary: string }>(content)
+        const score = reviewParsed?.overallScore ?? 0
+        if (score >= 90) {
+          addToast('success', `第 ${chapterIdx + 1} 章审校评分 ${score}/100，质量优秀，跳过改写`)
+          break // Skip rewrite, go to finalize
+        }
+        if (score >= 80) {
+          addToast('info', `第 ${chapterIdx + 1} 章审校评分 ${score}/100，存在可改进之处，执行改写`)
+        } else {
+          addToast('warning', `第 ${chapterIdx + 1} 章审校评分 ${score}/100，质量问题较多，执行改写`)
+        }
       }
 
       checkAbort()
@@ -647,14 +673,29 @@ export async function runAutoGeneration(autoConfig: AutoGenConfig): Promise<void
         const reviewResult = p.reviewResults[chapterIdx]
         if (!originalContent || !reviewResult) break
 
+        // Build character/relationship context for rewrite
+        const rewriteCharSummary = p.characters.length > 0
+          ? p.characters.map((c) => {
+              const status = c.lifeStatus === 'dead' ? '【已死亡】' : c.lifeStatus === 'alive' ? '【存活】' : ''
+              const rLoc = (c.locationTrajectory || [])
+              const loc = rLoc.length > 0 ? `当前位置：${rLoc[rLoc.length - 1]}` : ''
+              return `- ${c.name}（${c.weight}）${status}：性格：${c.personality || '未知'}，能力：${(c.abilities || []).join('、') || '无'}${loc ? '，' + loc : ''}`
+            }).join('\n')
+          : undefined
+        const rewriteRelSummary = p.relationships.length > 0
+          ? p.relationships.map((r) => `- ${r.from} ←${r.type}→ ${r.to}${r.description ? `：${r.description}` : ''}`).join('\n')
+          : undefined
+
         const messages: Message[] = [
           { role: 'system', content: buildSystemPrompt() },
-          { role: 'user', content: rewritePrompt(originalContent, reviewResult, p.params) },
+          { role: 'user', content: rewritePrompt(originalContent, reviewResult, p.params, { characters: rewriteCharSummary, relationships: rewriteRelSummary }) },
         ]
 
         const content = await streamGenerate(messages)
         useNovelStore.getState().setChapterContent(activeProjectId, chapterIdx, content)
         useNovelStore.getState().setChapterStatus(activeProjectId, chapterIdx, 'rewriting')
+        // Re-extract meta from rewritten content (must await to ensure next chapter gets fresh data)
+        await extractChapterMeta(chapterIdx, content)
       }
     }
 
@@ -663,6 +704,19 @@ export async function runAutoGeneration(autoConfig: AutoGenConfig): Promise<void
     switchStep('finalize')
     useNovelStore.getState().setChapterStatus(activeProjectId, chapterIdx, 'finalized')
     addToast('success', `第 ${chapterIdx + 1}/${totalChapters} 章已完成`)
+
+    // Update checkpoint to next chapter
+    if (chapterIdx + 1 < totalChapters) {
+      useUIStore.getState().setAutoProgress({ chapterIdx: chapterIdx + 1, phase: 'draft' })
+    }
+
+    // Check unresolved foreshadowings on last chapter
+    if (chapterIdx === totalChapters - 1) {
+      const unresolved = getProject()?.foreshadowings.filter((f) => f.status === 'planted') ?? []
+      if (unresolved.length > 0) {
+        addToast('warning', `⚠ 有 ${unresolved.length} 条伏笔未收束`)
+      }
+    }
   }
 
   // Full review: trigger UI to open FullReviewDialog, then wait for it to finish
@@ -704,6 +758,7 @@ export async function runAutoGeneration(autoConfig: AutoGenConfig): Promise<void
   }
 
   addToast('success', '全自动生成完成！')
+  useUIStore.getState().setAutoProgress(null)
 }
 
 export function abortAutoGeneration() {

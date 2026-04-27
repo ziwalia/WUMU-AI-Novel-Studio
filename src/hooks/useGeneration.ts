@@ -14,6 +14,7 @@ export function useGeneration() {
   const setStreaming = useSessionStore((s) => s.setStreaming)
   const setTokenUsage = useSessionStore((s) => s.setTokenUsage)
   const stopGenerationStore = useSessionStore((s) => s.stopGeneration)
+  const clearContent = useSessionStore((s) => s.clearContent)
   const isStreaming = useSessionStore((s) => s.isStreaming)
   const streamingContent = useSessionStore((s) => s.streamingContent)
   const addToast = useUIStore((s) => s.addToast)
@@ -56,6 +57,7 @@ export function useGeneration() {
       setGenerating(false)
       setTokenUsage(result.usage.inputTokens, result.usage.outputTokens)
       onComplete?.(result.content)
+      clearContent()
       return result
     } catch (err: unknown) {
       if (err instanceof DOMException && err.name === 'AbortError') {

@@ -5,7 +5,9 @@ import { useGeneration } from '@/hooks/useGeneration'
 import { Button } from '@/components/shared/Button'
 import { ChapterViewDialog } from '@/components/shared/ChapterViewDialog'
 import { FullReviewDialog } from '@/components/shared/FullReviewDialog'
-import { nextChapterPredictionPrompt } from '@/services/prompts'
+import { nextChapterPredictionPrompt, regenerateSummaryPrompt } from '@/services/prompts'
+import { updateChapterMeta } from '@/stores/characterStore'
+import { buildSystemPrompt } from '@/services/prompts'
 import type { Message } from '@/types'
 
 export function StepFinalize() {
@@ -65,13 +67,72 @@ export function StepFinalize() {
     finally { setPredicting(null) }
   }, [activeProjectId, project.blueprint, totalChapters, addToast, setNextChapterPrediction, getConfig])
 
+  const regenerateSummary = async (index: number) => {
+    const content = project.chapters[index]
+    if (!content || !activeProjectId) return
+    const config = getConfig()
+    if (!config) return
+    try {
+      const msgs: Message[] = [
+        { role: 'system', content: buildSystemPrompt() },
+        { role: 'user', content: regenerateSummaryPrompt(index, content) },
+      ]
+      const { chat } = await import('@/services/llm')
+      const result = await chat(config, msgs)
+      const summary = result.content.trim()
+      if (summary) updateChapterMeta(index, { summary })
+    } catch {
+      // Silently ignore summary regeneration failure
+    }
+  }
+
+  const ensureRunningSummary = (upToIndex: number) => {
+    if (!activeProjectId) return
+    const parts: string[] = []
+    for (let i = 0; i <= upToIndex; i++) {
+      const meta = project.chapterMetas[i]
+      if (meta?.summary) parts.push(`第${i + 1}章：${meta.summary}`)
+    }
+    if (parts.length > 0) {
+      const newRunning = parts.join('\n')
+      useNovelStore.getState().setRunningSummary(activeProjectId, newRunning)
+      updateChapterMeta(upToIndex, { runningSummarySnapshot: newRunning })
+    }
+  }
+
   const toggleFinalize = async (index: number) => {
     if (!activeProjectId) return
     const current = project.chapterStatuses[index]
     const willFinalize = current !== 'finalized'
     setChapterStatus(activeProjectId, index, willFinalize ? 'finalized' : 'draft')
-    if (willFinalize && index < totalChapters - 1 && !project.nextChapterPredictions?.[index]) {
-      await generatePrediction(index)
+    if (willFinalize) {
+      // Check meta completeness — if missing summary, regenerate it
+      const meta = project.chapterMetas[index]
+      if (!meta?.summary) {
+        regenerateSummary(index)
+      }
+      // Ensure runningSummary is up to date
+      ensureRunningSummary(index)
+      if (index < totalChapters - 1 && !project.nextChapterPredictions?.[index]) {
+        await generatePrediction(index)
+      }
+      // Check unresolved foreshadowings on last chapter or all-finalized
+      checkForeshadowingAlerts(index)
+    }
+  }
+
+  const checkForeshadowingAlerts = (index: number) => {
+    const unresolved = project.foreshadowings.filter((f) => f.status === 'planted')
+    if (unresolved.length === 0) return
+
+    const isLastChapter = index === totalChapters - 1
+    const updatedProject = useNovelStore.getState().projects.find((p) => p.id === activeProjectId)
+    const allDone = updatedProject && Object.values(updatedProject.chapterStatuses).filter((s) => s === 'finalized').length === totalChapters
+
+    if (isLastChapter || allDone) {
+      const items = unresolved.map((f) => `• 第${f.plantedChapter + 1}章 [${f.type}] ${f.content}`).join('\n')
+      addToast('warning', `有 ${unresolved.length} 条伏笔未收束：\n${items}`)
+      checkCharacterConsistency()
     }
   }
 
@@ -88,6 +149,26 @@ export function StepFinalize() {
       if (project.chapters[i]) setChapterStatus(activeProjectId, i, 'finalized')
     }
     addToast('success', '全部章节已定稿')
+    checkCharacterConsistency()
+  }
+
+  const checkCharacterConsistency = () => {
+    const deadChars = project.characters.filter((c) => c.lifeStatus === 'dead')
+    if (deadChars.length === 0) return
+    const issues: string[] = []
+    for (const ch of deadChars) {
+      const deathChapter = ch.lastAppearance
+      if (deathChapter === undefined) continue
+      for (let i = deathChapter + 1; i < totalChapters; i++) {
+        const meta = project.chapterMetas[i]
+        if (meta?.summary && meta.summary.includes(ch.name)) {
+          issues.push(`角色"${ch.name}"在第${deathChapter + 1}章已死亡，但在第${i + 1}章 summary 中仍有出场`)
+        }
+      }
+    }
+    if (issues.length > 0) {
+      addToast('warning', `角色一致性警告：\n${issues.join('\n')}`)
+    }
   }
 
   const toggleExpand = (index: number) => {

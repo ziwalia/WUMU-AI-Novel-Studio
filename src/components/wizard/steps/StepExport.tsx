@@ -56,7 +56,7 @@ export function StepExport() {
             totalChapters,
             params: project.params,
             architecture: project.architecture,
-            volumeOutline: project.volumeOutline,
+            novelOutline: project.novelOutline,
             blueprint: project.blueprint,
             chapters: project.chapters,
             exportedAt: new Date().toISOString(),

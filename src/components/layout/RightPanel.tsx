@@ -4,7 +4,7 @@ import { useNovelStore } from '@/stores/novelStore'
 import { useCharacters, useRelationships, useCharacterSnapshots, useForeshadowings, createCharacter, addCharacter, updateCharacter, removeCharacter, addRelationship, removeRelationship } from '@/stores/characterStore'
 import { STEP_LABELS, WEIGHT_LABELS, RELATIONSHIP_TYPES, REL_COLORS, FORESHADOWING_LABELS } from '@/types'
 import type { CharacterWeight, CharacterRelationship, RelationshipType } from '@/types'
-import { buildSystemPrompt, architecturePrompt, volumeOutlinePrompt, blueprintPrompt, draftPrompt, reviewPrompt, rewritePrompt, buildProjectContext } from '@/services/prompts'
+import { buildSystemPrompt, architecturePrompt, novelOutlinePrompt, blueprintPrompt, draftPrompt, reviewPrompt, rewritePrompt, buildProjectContext } from '@/services/prompts'
 
 function ContextTab() {
   const activeProjectId = useNovelStore((s) => s.activeProjectId)
@@ -30,25 +30,27 @@ function ContextTab() {
       outputContent = globalContext
       break
     case 'architecture':
-      inputPrompt = architecturePrompt(params, genres)
+      inputPrompt = architecturePrompt(params, genres,
+        project.characters.map((c) => ({ name: c.name, weight: c.weight, age: c.age, personality: c.personality, abilities: c.abilities, basicInfo: c.basicInfo })),
+        project.relationships.map((r) => ({ from: r.from, to: r.to, type: r.type, description: r.description })))
       outputLabel = '架构输出'
       outputContent = project.architecture || ''
       break
-    case 'volume':
-      inputPrompt = volumeOutlinePrompt(
+    case 'outline':
+      inputPrompt = novelOutlinePrompt(
         params,
         project.architecture || '',
         genres,
         project.characters.map((c) => ({ name: c.name, weight: c.weight, age: c.age, personality: c.personality, abilities: c.abilities, basicInfo: c.basicInfo })),
         project.relationships.map((r) => ({ from: r.from, to: r.to, type: r.type, description: r.description })),
       )
-      outputLabel = '卷纲输出'
-      outputContent = project.volumeOutline || ''
+      outputLabel = '大纲输出'
+      outputContent = project.novelOutline || ''
       break
     case 'blueprint':
       inputPrompt = blueprintPrompt(
         params,
-        project.volumeOutline || '',
+        project.novelOutline || '',
         genres,
         project.characters.map((c) => ({ name: c.name, weight: c.weight, age: c.age, personality: c.personality, abilities: c.abilities, basicInfo: c.basicInfo })),
         project.relationships.map((r) => ({ from: r.from, to: r.to, type: r.type, description: r.description })),
@@ -466,7 +468,7 @@ function CharacterCard({ character, relationships, isEditing, onEdit, onDelete, 
   const tags: string[] = []
   if (character.age) tags.push(character.age)
   if (character.personality) tags.push(character.personality.slice(0, 8))
-  if (character.abilities.length > 0) tags.push(character.abilities[0]!)
+  if ((character.abilities || []).length > 0) tags.push(character.abilities![0]!)
 
   return (
     <div

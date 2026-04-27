@@ -6,6 +6,7 @@ import { StatusBar } from './StatusBar'
 import { SettingsDialog } from '@/components/shared/SettingsDialog'
 import { NewProjectDialog } from '@/components/shared/NewProjectDialog'
 import { WizardShell } from '@/components/wizard/WizardShell'
+import { ErrorBoundary } from '@/components/shared/ErrorBoundary'
 import { useNovelStore } from '@/stores/novelStore'
 import { useUIStore } from '@/stores/uiStore'
 
@@ -72,11 +73,13 @@ export function AppShell() {
           />
         )}
         <main className="flex-1 flex flex-col overflow-hidden" role="main">
-          {activeProjectId ? (
-            <WizardShell />
-          ) : (
-            <WelcomeScreen />
-          )}
+          <ErrorBoundary>
+            {activeProjectId ? (
+              <WizardShell />
+            ) : (
+              <WelcomeScreen />
+            )}
+          </ErrorBoundary>
         </main>
         {/* Right panel resize handle */}
         {!rightPanelCollapsed && (
@@ -103,10 +106,11 @@ function WelcomeScreen() {
     createProject('新小说', '', {
       topic: '',
       genre: '',
-      volumeCount: 1,
       chapterCount: 10,
       wordsPerChapter: 3000,
       strictWordCount: false,
+      storyPremise: '',
+      narrativePerspective: '第三人称有限视角（聚焦第一角色）',
       userGuidance: '',
       coreCharacters: '',
       keyItems: '',

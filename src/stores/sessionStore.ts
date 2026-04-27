@@ -5,6 +5,8 @@ interface SessionState {
   isStreaming: boolean
   inputTokens: number
   outputTokens: number
+  totalInputTokens: number
+  totalOutputTokens: number
   abortController: AbortController | null
 
   setStreamingContent: (content: string) => void
@@ -21,6 +23,8 @@ export const useSessionStore = create<SessionState>((set, get) => ({
   isStreaming: false,
   inputTokens: 0,
   outputTokens: 0,
+  totalInputTokens: 0,
+  totalOutputTokens: 0,
   abortController: null,
 
   setStreamingContent: (content) => set({ streamingContent: content }),
@@ -30,7 +34,13 @@ export const useSessionStore = create<SessionState>((set, get) => ({
 
   setStreaming: (streaming) => set({ isStreaming: streaming }),
 
-  setTokenUsage: (input, output) => set({ inputTokens: input, outputTokens: output }),
+  setTokenUsage: (input, output) =>
+    set((state) => ({
+      inputTokens: input,
+      outputTokens: output,
+      totalInputTokens: state.totalInputTokens + input,
+      totalOutputTokens: state.totalOutputTokens + output,
+    })),
 
   startGeneration: () => {
     const controller = new AbortController()

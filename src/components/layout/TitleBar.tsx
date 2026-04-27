@@ -2,17 +2,11 @@ import { useEffect } from 'react'
 import { useUIStore } from '@/stores/uiStore'
 
 export function TitleBar() {
-  const theme = useUIStore((s) => s.theme)
-  const setTheme = useUIStore((s) => s.setTheme)
   const setSettingsOpen = useUIStore((s) => s.setSettingsOpen)
 
   useEffect(() => {
-    document.documentElement.setAttribute('data-theme', theme)
-  }, [theme])
-
-  const toggleTheme = () => {
-    setTheme(theme === 'light' ? 'dark' : 'light')
-  }
+    document.documentElement.setAttribute('data-theme', 'light')
+  }, [])
 
   return (
     <header
@@ -38,16 +32,6 @@ export function TitleBar() {
           title="设置"
         >
           <span className="material-symbols-outlined text-base">settings</span>
-        </button>
-        <button
-          onClick={toggleTheme}
-          className="p-1.5 rounded-[var(--radius-sm)] hover:bg-[var(--color-surface-hover)] text-[var(--color-text-tertiary)] transition-colors"
-          aria-label={theme === 'light' ? '切换暗色模式' : '切换亮色模式'}
-          title={theme === 'light' ? '暗色模式' : '亮色模式'}
-        >
-          <span className="material-symbols-outlined text-base">
-            {theme === 'light' ? 'dark_mode' : 'light_mode'}
-          </span>
         </button>
       </div>
     </header>

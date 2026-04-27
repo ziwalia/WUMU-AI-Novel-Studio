@@ -83,11 +83,27 @@ export function setCharacters(characters: Character[]) {
   const { activeProjectId } = useNovelStore.getState()
   if (!activeProjectId) return
   useNovelStore.setState((state) => ({
-    projects: state.projects.map((p) =>
-      p.id === activeProjectId
-        ? { ...p, characters, updatedAt: new Date().toISOString() }
-        : p
-    ),
+    projects: state.projects.map((p) => {
+      if (p.id !== activeProjectId) return p
+      const existing = p.characters
+      const nameMap = new Map(existing.map((c) => [c.name, c]))
+      const merged = characters.map((nc) => {
+        const prev = nameMap.get(nc.name)
+        if (!prev) return nc
+        nameMap.delete(nc.name)
+        return {
+          ...prev,
+          ...Object.fromEntries(
+            Object.entries(nc).filter(([_, v]) => v !== '' && v !== undefined && !(Array.isArray(v) && v.length === 0))
+          ),
+        } as Character
+      })
+      // Keep characters not in the new list (manually added)
+      for (const [, c] of nameMap) {
+        merged.push(c)
+      }
+      return { ...p, characters: merged, updatedAt: new Date().toISOString() }
+    }),
   }))
 }
 
@@ -124,7 +140,7 @@ export function resolveForeshadowing(id: string, chapter: number) {
 export function updateChapterMeta(chapterIndex: number, meta: Partial<ChapterMeta>) {
   const { activeProjectId } = useNovelStore.getState()
   if (!activeProjectId) return
-  const emptyMeta: ChapterMeta = { summary: '', timeline: '', characterUpdates: {}, foreshadowingPlanted: [], foreshadowingResolved: [], itemChanges: [], characterSnapshot: undefined }
+  const emptyMeta: ChapterMeta = { summary: '', timeline: '', sceneTypes: [], pacingTag: 'transition', emotionIntensity: 'medium', characterUpdates: {}, foreshadowingPlanted: [], foreshadowingResolved: [], itemChanges: [], characterSnapshot: undefined }
   useNovelStore.setState((state) => ({
     projects: state.projects.map((p) =>
       p.id === activeProjectId
@@ -193,11 +209,23 @@ export function setRelationships(relationships: CharacterRelationship[]) {
   const { activeProjectId } = useNovelStore.getState()
   if (!activeProjectId) return
   useNovelStore.setState((state) => ({
-    projects: state.projects.map((p) =>
-      p.id === activeProjectId
-        ? { ...p, relationships, updatedAt: new Date().toISOString() }
-        : p
-    ),
+    projects: state.projects.map((p) => {
+      if (p.id !== activeProjectId) return p
+      const existing = p.relationships
+      const key = (r: { from: string; to: string }) => [r.from, r.to].sort().join('→')
+      const existingMap = new Map(existing.map((r) => [key(r), r]))
+      const merged = relationships.map((nr) => {
+        const k = key(nr)
+        const prev = existingMap.get(k)
+        if (!prev) return nr
+        existingMap.delete(k)
+        return { ...prev, ...nr } as CharacterRelationship
+      })
+      for (const [, r] of existingMap) {
+        merged.push(r)
+      }
+      return { ...p, relationships: merged, updatedAt: new Date().toISOString() }
+    }),
   }))
 }
 
@@ -207,7 +235,7 @@ export function saveCharacterSnapshot(chapterIndex: number) {
   useNovelStore.setState((state) => ({
     projects: state.projects.map((p) => {
       if (p.id !== activeProjectId) return p
-      const emptyMeta: ChapterMeta = { summary: '', timeline: '', characterUpdates: {}, foreshadowingPlanted: [], foreshadowingResolved: [], itemChanges: [], characterSnapshot: undefined }
+      const emptyMeta: ChapterMeta = { summary: '', timeline: '', sceneTypes: [], pacingTag: 'transition', emotionIntensity: 'medium', characterUpdates: {}, foreshadowingPlanted: [], foreshadowingResolved: [], itemChanges: [], characterSnapshot: undefined }
       const existing = p.chapterMetas[chapterIndex] || emptyMeta
       return {
         ...p,

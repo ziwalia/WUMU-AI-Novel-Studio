@@ -3,6 +3,7 @@ import { useNovelStore } from '@/stores/novelStore'
 import { useUIStore } from '@/stores/uiStore'
 import { useGeneration } from '@/hooks/useGeneration'
 import { Button } from '@/components/shared/Button'
+import { parseJsonFromLLM } from '@/lib/extractJson'
 import {
   fullReviewPass1Prompt,
   fullReviewPass2Prompt,
@@ -34,16 +35,6 @@ function normalizeSuggestions(raw: unknown[]): string[] {
       : typeof s === 'object' && s !== null ? Object.values(s).filter((v) => typeof v === 'string').join('：')
       : String(s)
   )
-}
-
-const parseJsonFromLLM = (raw: string) => {
-  try {
-    const jsonMatch = raw.match(/```json\s*([\s\S]*?)\s*```/)
-    const rawJson = jsonMatch?.[1] ?? raw
-    return JSON.parse(rawJson)
-  } catch {
-    return null
-  }
 }
 
 export function FullReviewDialog({ open, project, onClose }: FullReviewDialogProps) {
@@ -125,7 +116,7 @@ export function FullReviewDialog({ open, project, onClose }: FullReviewDialogPro
           })
         })
 
-        const parsed = parseJsonFromLLM(accumulated)
+        const parsed = parseJsonFromLLM<{ dimensions?: { name?: string; score?: number; comment?: string }[]; passSummary?: string }>(accumulated)
         if (!parsed || !Array.isArray(parsed.dimensions)) throw new Error('Invalid response')
 
         const dims: FullReviewDimension[] = parsed.dimensions.map((d: { name?: string; score?: number; comment?: string }) => ({
@@ -244,7 +235,7 @@ export function FullReviewDialog({ open, project, onClose }: FullReviewDialogPro
           { role: 'system', content: '你是一位资深网络小说编辑。用中文回答。' },
           { role: 'user', content: fullReviewSuggestionPrompt(allDimensions, overallScore) },
         ])
-        const sugParsed = parseJsonFromLLM(sugResult.content)
+        const sugParsed = parseJsonFromLLM<{ summary?: string; suggestions?: unknown[] }>(sugResult.content)
         if (sugParsed) {
           finalSummary = sugParsed.summary || ''
           const rawSugs: unknown[] = Array.isArray(sugParsed.suggestions) ? sugParsed.suggestions : []

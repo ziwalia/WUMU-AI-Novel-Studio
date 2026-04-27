@@ -1,7 +1,7 @@
 import type { WizardStep } from '@/types'
 import { StepProjectInfo } from './steps/StepProjectInfo'
 import { StepArchitecture } from './steps/StepArchitecture'
-import { StepVolume } from './steps/StepVolume'
+import { StepOutline } from './steps/StepOutline'
 import { StepBlueprint } from './steps/StepBlueprint'
 import { StepDraft } from './steps/StepDraft'
 import { StepReview } from './steps/StepReview'
@@ -12,7 +12,7 @@ import { StepExport } from './steps/StepExport'
 const STEP_COMPONENTS: Record<WizardStep, React.ComponentType> = {
   'project-info': StepProjectInfo,
   'architecture': StepArchitecture,
-  'volume': StepVolume,
+  'outline': StepOutline,
   'blueprint': StepBlueprint,
   'draft': StepDraft,
   'review': StepReview,

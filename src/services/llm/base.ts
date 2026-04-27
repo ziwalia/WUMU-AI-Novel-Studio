@@ -19,7 +19,7 @@ export function buildHeaders(config: LLMConfig): Record<string, string> {
 }
 
 export function buildPayload(config: LLMConfig, messages: Message[], stream: boolean) {
-  return {
+  const payload: Record<string, unknown> = {
     model: config.modelName,
     messages: messages.map((m) => ({ role: m.role, content: m.content })),
     temperature: config.temperature,
@@ -27,6 +27,10 @@ export function buildPayload(config: LLMConfig, messages: Message[], stream: boo
     max_tokens: config.maxTokens,
     stream,
   }
+  if (stream) {
+    payload.stream_options = { include_usage: true }
+  }
+  return payload
 }
 
 export function resolveEndpoint(config: LLMConfig): string {

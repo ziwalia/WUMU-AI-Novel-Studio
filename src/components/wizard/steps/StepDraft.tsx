@@ -3,13 +3,14 @@ import { useNovelStore } from '@/stores/novelStore'
 import { useSessionStore } from '@/stores/sessionStore'
 import { useUIStore } from '@/stores/uiStore'
 import { useGeneration } from '@/hooks/useGeneration'
-import { addCharacter, updateCharacter, createCharacter, addRelationship, addForeshadowing, resolveForeshadowing, updateChapterMeta, saveCharacterSnapshot, restoreCharacterSnapshot } from '@/stores/characterStore'
+import { addCharacter, updateCharacter, createCharacter, addRelationship, updateRelationship, addForeshadowing, resolveForeshadowing, updateChapterMeta, saveCharacterSnapshot, restoreCharacterSnapshot } from '@/stores/characterStore'
 import { buildSystemPrompt, draftPrompt, extractChapterMetaPrompt, updateRunningSummaryPrompt, type DraftContext } from '@/services/prompts'
 import { Button } from '@/components/shared/Button'
 import { Spinner } from '@/components/shared/Spinner'
-import type { Message, CharacterWeight, Foreshadowing } from '@/types'
+import { parseJsonFromLLM } from '@/lib/extractJson'
+import type { Message, CharacterWeight, RelationshipType } from '@/types'
 
-type DraftCharChange = {
+type MetaCharChange = {
   name: string
   type: 'status_update' | 'new_character'
   changes: {
@@ -24,7 +25,7 @@ type DraftCharChange = {
   }
 }
 
-type DraftRelChange = {
+type MetaRelChange = {
   from: string
   to: string
   action: 'add' | 'change'
@@ -32,7 +33,7 @@ type DraftRelChange = {
   description?: string
 }
 
-const REL_TYPE_MAP: Record<string, import('@/types').RelationshipType> = {
+const REL_TYPE_MAP: Record<string, RelationshipType> = {
   '恋人': '恋人', '师徒': '师徒', '敌对': '敌对', '同门': '同门',
   '盟友': '盟友', '朋友': '朋友', '亲人': '亲人', '其他': '其他',
 }
@@ -55,73 +56,64 @@ function parseRoleToWeight(role: string): CharacterWeight {
   return 'supporting'
 }
 
-function extractDraftChanges(raw: string, chapterIndex: number) {
-  try {
-    // Try to find character change annotations in the draft
-    const annotationMatch = raw.match(/\[角色变化\]([\s\S]*?)\[\/角色变化\]/)
-    if (!annotationMatch) return
-    const parsed = JSON.parse(annotationMatch[1]!)
-    if (!parsed) return
+function applyCharAndRelChanges(
+  characterChanges: MetaCharChange[],
+  relationshipChanges: MetaRelChange[],
+  chapterIndex: number,
+) {
+  const project = useNovelStore.getState().projects.find(
+    (p) => p.id === useNovelStore.getState().activeProjectId,
+  )
+  if (!project) return
 
-    const project = useNovelStore.getState().projects.find(
-      (p) => p.id === useNovelStore.getState().activeProjectId
-    )
-    if (!project) return
+  const charNameMap = new Map(project.characters.map((c) => [c.name, c]))
 
-    const existingChars = project.characters
-    const existingRels = project.relationships
-    const charNameMap = new Map(existingChars.map((c) => [c.name, c]))
-
-    // Process character changes
-    if (parsed.characterChanges && Array.isArray(parsed.characterChanges)) {
-      for (const change of parsed.characterChanges as DraftCharChange[]) {
-        if (!change.name || !change.changes) continue
-        if (change.type === 'new_character') {
-          if (!charNameMap.has(change.name)) {
-            addCharacter(createCharacter({
-              name: change.name,
-              weight: change.changes.role ? parseRoleToWeight(change.changes.role) : 'supporting',
-              age: change.changes.age || '',
-              personality: change.changes.personality || '',
-              abilities: change.changes.abilities || [],
-              basicInfo: change.changes.description || '',
-            }))
-          }
-        } else if (change.type === 'status_update') {
-          const existing = charNameMap.get(change.name)
-          if (existing) {
-            const updates: Partial<import('@/types').Character> = {}
-            const c = change.changes
-            if (c.age) updates.age = c.age
-            if (c.personality) updates.personality = c.personality
-            if (c.abilities && c.abilities.length > 0) updates.abilities = c.abilities
-            if (c.basicInfo) updates.basicInfo = c.basicInfo
-            if (c.location) updates.locationTrajectory = [...(existing.locationTrajectory || []), c.location]
-            if (c.status === 'dead' || c.status === 'alive') updates.lifeStatus = c.status as 'alive' | 'dead'
-            updates.lastAppearance = chapterIndex
-            if (Object.keys(updates).length > 0) updateCharacter(existing.id, updates)
-          }
-        }
+  for (const change of characterChanges) {
+    if (!change.name || !change.changes) continue
+    if (change.type === 'new_character') {
+      if (!charNameMap.has(change.name)) {
+        const nc = createCharacter({
+          name: change.name,
+          weight: change.changes.role ? parseRoleToWeight(change.changes.role) : 'supporting',
+          age: change.changes.age || '',
+          personality: change.changes.personality || '',
+          abilities: change.changes.abilities || [],
+          basicInfo: change.changes.description || '',
+        })
+        addCharacter(nc)
+        charNameMap.set(change.name, nc)
+      }
+    } else if (change.type === 'status_update') {
+      const existing = charNameMap.get(change.name)
+      if (existing) {
+        const updates: Partial<import('@/types').Character> = {}
+        const c = change.changes
+        if (c.age) updates.age = c.age
+        if (c.personality) updates.personality = c.personality
+        if (c.abilities && c.abilities.length > 0) updates.abilities = c.abilities
+        if (c.basicInfo) updates.basicInfo = c.basicInfo
+        if (c.location) updates.locationTrajectory = [...(existing.locationTrajectory || []), c.location]
+        if (c.status === 'dead' || c.status === 'alive') updates.lifeStatus = c.status as 'alive' | 'dead'
+        updates.lastAppearance = chapterIndex
+        if (Object.keys(updates).length > 0) updateCharacter(existing.id, updates)
       }
     }
+  }
 
-    // Process relationship changes
-    if (parsed.relationshipChanges && Array.isArray(parsed.relationshipChanges)) {
-      for (const rc of parsed.relationshipChanges as DraftRelChange[]) {
-        if (!rc.from || !rc.to) continue
-        if (rc.action === 'add') {
-          const relType = REL_TYPE_MAP[rc.type] || '其他'
-          const exists = existingRels.find(
-            (r) => (r.from === rc.from && r.to === rc.to) || (r.from === rc.to && r.to === rc.from)
-          )
-          if (!exists) {
-            addRelationship({ from: rc.from, to: rc.to, type: relType, description: rc.description || '' })
-          }
-        }
-      }
+  for (const rc of relationshipChanges) {
+    if (!rc.from || !rc.to) continue
+    const relType = REL_TYPE_MAP[rc.type] || '其他'
+    if (rc.action === 'add') {
+      const exists = project.relationships.find(
+        (r) => (r.from === rc.from && r.to === rc.to) || (r.from === rc.to && r.to === rc.from),
+      )
+      if (!exists) addRelationship({ from: rc.from, to: rc.to, type: relType, description: rc.description || '' })
+    } else if (rc.action === 'change') {
+      const existing = project.relationships.find(
+        (r) => (r.from === rc.from && r.to === rc.to) || (r.from === rc.to && r.to === rc.from),
+      )
+      if (existing) updateRelationship(existing.id, { type: relType, ...(rc.description ? { description: rc.description } : {}) })
     }
-  } catch {
-    // Silently ignore
   }
 }
 
@@ -154,36 +146,52 @@ async function extractChapterMeta(
     const { chat } = await import('@/services/llm')
     const result = await chat(config, messages)
 
-    const jsonMatch = result.content.match(/```json\s*([\s\S]*?)\s*```/)
-    const rawJson = jsonMatch?.[1] ?? result.content
-    const parsed = JSON.parse(rawJson)
+    const parsed = parseJsonFromLLM<{
+      summary?: string; timeline?: string; sceneTypes?: string[];
+      pacingTag?: string; emotionIntensity?: string;
+      foreshadowingPlanted?: unknown[]; foreshadowingResolved?: unknown[];
+      itemChanges?: unknown[];
+      characterChanges?: MetaCharChange[];
+      relationshipChanges?: MetaRelChange[];
+    }>(result.content)
+    if (!parsed) return
 
-    // Write summary and timeline
+    // Write summary, timeline, scene info
     const metaUpdates: Partial<import('@/types').ChapterMeta> = {}
-    if (parsed.summary && typeof parsed.summary === 'string') {
-      metaUpdates.summary = parsed.summary
+    if (parsed.summary && typeof parsed.summary === 'string') metaUpdates.summary = parsed.summary
+    if (parsed.timeline && typeof parsed.timeline === 'string') metaUpdates.timeline = parsed.timeline
+    if (Array.isArray(parsed.sceneTypes)) metaUpdates.sceneTypes = parsed.sceneTypes
+    if (parsed.pacingTag && ['tension', 'calm', 'transition'].includes(parsed.pacingTag)) {
+      metaUpdates.pacingTag = parsed.pacingTag as 'tension' | 'calm' | 'transition'
     }
-    if (parsed.timeline && typeof parsed.timeline === 'string') {
-      metaUpdates.timeline = parsed.timeline
+    if (parsed.emotionIntensity && ['high', 'medium', 'low'].includes(parsed.emotionIntensity)) {
+      metaUpdates.emotionIntensity = parsed.emotionIntensity as 'high' | 'medium' | 'low'
     }
-    if (Object.keys(metaUpdates).length > 0) {
-      updateChapterMeta(chapterIndex, metaUpdates)
+    if (Object.keys(metaUpdates).length > 0) updateChapterMeta(chapterIndex, metaUpdates)
+
+    // Apply character and relationship changes
+    if (Array.isArray(parsed.characterChanges) || Array.isArray(parsed.relationshipChanges)) {
+      applyCharAndRelChanges(
+        Array.isArray(parsed.characterChanges) ? parsed.characterChanges : [],
+        Array.isArray(parsed.relationshipChanges) ? parsed.relationshipChanges : [],
+        chapterIndex,
+      )
     }
 
     // Add new foreshadowings
     if (Array.isArray(parsed.foreshadowingPlanted)) {
-      for (const fs of parsed.foreshadowingPlanted) {
+      for (const rawFs of parsed.foreshadowingPlanted) {
+        const fs = rawFs as Record<string, unknown>
         if (!fs.content) continue
-        const fsType = FS_TYPE_MAP[fs.type] || 'SF'
-        const newFs: Foreshadowing = {
+        const fsType = FS_TYPE_MAP[fs.type as string] || 'SF'
+        addForeshadowing({
           id: generateFsId(),
           type: fsType,
-          content: fs.content,
+          content: fs.content as string,
           status: 'planted',
           plantedChapter: chapterIndex,
           priority: 'medium',
-        }
-        addForeshadowing(newFs)
+        })
       }
     }
 
@@ -191,17 +199,14 @@ async function extractChapterMeta(
     if (Array.isArray(parsed.foreshadowingResolved)) {
       for (const resolvedContent of parsed.foreshadowingResolved) {
         if (typeof resolvedContent !== 'string') continue
-        // Fuzzy match by content similarity
         const match = project.foreshadowings.find(
           (f) => f.status === 'planted' && (
             f.content === resolvedContent ||
             f.content.includes(resolvedContent) ||
             resolvedContent.includes(f.content)
-          )
+          ),
         )
-        if (match) {
-          resolveForeshadowing(match.id, chapterIndex)
-        }
+        if (match) resolveForeshadowing(match.id, chapterIndex)
       }
     }
 
@@ -209,9 +214,8 @@ async function extractChapterMeta(
     const chapterSummary = parsed.summary && typeof parsed.summary === 'string' ? parsed.summary : ''
     if (chapterSummary) {
       try {
-        const { chat } = await import('@/services/llm')
         const currentProject = useNovelStore.getState().projects.find(
-          (p) => p.id === useNovelStore.getState().activeProjectId
+          (p) => p.id === useNovelStore.getState().activeProjectId,
         )
         const oldSummary = currentProject?.runningSummary || ''
         const summaryMessages: Message[] = [
@@ -221,11 +225,7 @@ async function extractChapterMeta(
         const summaryResult = await chat(config, summaryMessages)
         const newSummary = summaryResult.content.trim()
         if (newSummary) {
-          useNovelStore.getState().setRunningSummary(
-            useNovelStore.getState().activeProjectId!,
-            newSummary,
-          )
-          // Save snapshot in chapterMeta
+          useNovelStore.getState().setRunningSummary(useNovelStore.getState().activeProjectId!, newSummary)
           updateChapterMeta(chapterIndex, { runningSummarySnapshot: newSummary })
         }
       } catch {
@@ -303,17 +303,43 @@ export function StepDraft() {
       if (ch && ch.length > 0) endings.push({ index: i, ending: ch.slice(-500) })
     }
     if (endings.length > 0) draftCtx.prevChapterEndings = endings
+    // Full text of previous 2 chapters
+    if (idx > 0 && currentProject.chapters[idx - 1]) {
+      draftCtx.prevFullChapter = currentProject.chapters[idx - 1]
+    }
+    if (idx > 1 && currentProject.chapters[idx - 2]) {
+      draftCtx.prevPrevFullChapter = currentProject.chapters[idx - 2]
+    }
+    // Recent scene types (last 5 chapters, skip for first chapter)
+    if (idx > 0) {
+      const sceneInfo = []
+      for (let i = Math.max(0, idx - 5); i < idx; i++) {
+        const meta = currentProject.chapterMetas[i]
+        if (meta?.sceneTypes && meta.sceneTypes.length > 0) {
+          sceneInfo.push({
+            chapterIndex: i,
+            sceneTypes: meta.sceneTypes,
+            pacingTag: meta.pacingTag || 'transition',
+            emotionIntensity: meta.emotionIntensity || 'medium',
+          })
+        }
+      }
+      if (sceneInfo.length > 0) draftCtx.recentSceneTypes = sceneInfo
+    }
     // Active characters: appeared in last 3 chapters or protagonist
     const recentChars = currentProject.characters.filter(
       (c) => c.weight === 'protagonist' || (c.lastAppearance >= 0 && c.lastAppearance >= idx - 3)
     )
     if (recentChars.length > 0) {
-      draftCtx.activeCharacters = recentChars.map((c) => ({
-        name: c.name,
-        status: c.lifeStatus === 'alive' ? '存活' : c.lifeStatus === 'dead' ? '已死亡' : '未知',
-        location: c.locationTrajectory.length > 0 ? c.locationTrajectory[c.locationTrajectory.length - 1]! : '未知',
-        emotion: c.emotionalArc || '正常',
-      }))
+      draftCtx.activeCharacters = recentChars.map((c) => {
+        const loc = c.locationTrajectory || []
+        return {
+          name: c.name,
+          status: c.lifeStatus === 'alive' ? '存活' : c.lifeStatus === 'dead' ? '已死亡' : '未知',
+          location: loc.length > 0 ? loc[loc.length - 1]! : '未知',
+          emotion: c.emotionalArc || '正常',
+        }
+      })
     }
     // Open foreshadowing
     const openFs = currentProject.foreshadowings.filter((f) => f.status === 'planted')
@@ -362,13 +388,11 @@ export function StepDraft() {
       if (activeProjectId) {
         setChapterContent(activeProjectId, idx, content)
         setChapterStatus(activeProjectId, idx, 'draft')
-        // Extract character changes from draft
-        extractDraftChanges(content, idx)
         // Save snapshot for the next chapter
         if (idx + 1 < currentProject.params.chapterCount) {
           saveCharacterSnapshot(idx + 1)
         }
-        // Extract meta (summary, timeline, foreshadowing) in background
+        // Extract meta (summary, timeline, foreshadowing, character/rel changes) in background
         extractChapterMeta(idx, content, getConfig)
       }
     })

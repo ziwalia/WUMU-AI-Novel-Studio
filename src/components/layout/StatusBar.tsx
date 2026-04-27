@@ -5,6 +5,8 @@ export function StatusBar() {
   const isStreaming = useSessionStore((s) => s.isStreaming)
   const inputTokens = useSessionStore((s) => s.inputTokens)
   const outputTokens = useSessionStore((s) => s.outputTokens)
+  const totalInputTokens = useSessionStore((s) => s.totalInputTokens)
+  const totalOutputTokens = useSessionStore((s) => s.totalOutputTokens)
   const configs = useLLMStore((s) => s.configs)
   const activeConfigId = useLLMStore((s) => s.activeConfigId)
 
@@ -32,7 +34,12 @@ export function StatusBar() {
 
       {(inputTokens > 0 || outputTokens > 0) && (
         <span>
-          Token: {(inputTokens / 1000).toFixed(1)}k / {(outputTokens / 1000).toFixed(1)}k
+          本次: {(inputTokens / 1000).toFixed(1)}k / {(outputTokens / 1000).toFixed(1)}k
+        </span>
+      )}
+      {(totalInputTokens > 0 || totalOutputTokens > 0) && (
+        <span>
+          累计: {(totalInputTokens / 1000).toFixed(1)}k / {(totalOutputTokens / 1000).toFixed(1)}k
         </span>
       )}
     </footer>

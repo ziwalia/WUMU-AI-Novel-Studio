@@ -18,7 +18,7 @@ function getStepStatusFromData(step: WizardStep, project: NovelProject): StepSta
     switch (step) {
       case 'project-info': return !!project.params.topic ? 'completed' : null
       case 'architecture': return !!project.architecture ? 'completed' : null
-      case 'volume': return !!project.volumeOutline ? 'completed' : null
+      case 'outline': return !!project.novelOutline ? 'completed' : null
       case 'blueprint': return !!project.blueprint ? 'completed' : null
       case 'draft': {
         const count = Object.keys(project.chapters).length

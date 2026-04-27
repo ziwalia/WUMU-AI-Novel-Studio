@@ -3,7 +3,7 @@ import type { Character, Foreshadowing } from './character'
 export type WizardStep =
   | 'project-info'
   | 'architecture'
-  | 'volume'
+  | 'outline'
   | 'blueprint'
   | 'draft'
   | 'review'
@@ -14,7 +14,7 @@ export type WizardStep =
 export const WIZARD_STEPS: WizardStep[] = [
   'project-info',
   'architecture',
-  'volume',
+  'outline',
   'blueprint',
   'draft',
   'review',
@@ -26,7 +26,7 @@ export const WIZARD_STEPS: WizardStep[] = [
 export const STEP_LABELS: Record<WizardStep, string> = {
   'project-info': '项目信息',
   'architecture': '小说架构',
-  'volume': '分卷大纲',
+  'outline': '小说大纲',
   'blueprint': '章节目录',
   'draft': '草稿生成',
   'review': '一致性审校',
@@ -40,10 +40,11 @@ export type ChapterStatus = 'draft' | 'reviewing' | 'rewriting' | 'finalized'
 export interface NovelParams {
   topic: string
   genre: string
-  volumeCount: number
   chapterCount: number
   wordsPerChapter: number
   strictWordCount: boolean
+  storyPremise: string
+  narrativePerspective: string
   userGuidance: string
   writingStyle: string
   coreCharacters: string
@@ -52,13 +53,24 @@ export interface NovelParams {
   timePressure: string
 }
 
-export interface VolumeOutline {
-  volumeIndex: number
+export interface OutlineStage {
+  stageIndex: number
   title: string
   theme: string
   chapterRange: [number, number]
   keyEvents: string[]
+  emotionalTone: string
   characterArcs: string
+}
+
+export interface StructuredSummary {
+  mainPlotProgress: string
+  activeConflicts: string[]
+  unresolvedMysteries: string[]
+  emotionalTone: string
+  recentEvents: string[]
+  powerBalance: string
+  keyTurningPoints: string[]
 }
 
 export interface ChapterBlueprint {
@@ -70,6 +82,9 @@ export interface ChapterBlueprint {
 export interface ChapterMeta {
   summary: string
   timeline: string
+  sceneTypes: string[]
+  pacingTag: 'tension' | 'calm' | 'transition'
+  emotionIntensity: 'high' | 'medium' | 'low'
   characterUpdates: Record<string, {
     location?: string
     emotionalState?: string
@@ -112,11 +127,12 @@ export interface NovelProject {
   params: NovelParams
   // Generated data
   architecture: string
-  volumeOutline: string
+  novelOutline: string
   blueprint: string
   chapters: Record<number, string>
   reviewResults: Record<number, string>
   reviewRounds: Record<number, number>
+  chapterHistory: Record<number, string[]>
   // Phase 3+4: Characters, foreshadowing, chapter metadata
   characters: Character[]
   relationships: import('./character').CharacterRelationship[]

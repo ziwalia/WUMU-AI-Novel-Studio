@@ -46,6 +46,8 @@ interface UIState {
   toasts: Toast[]
   autoGenerating: boolean
   autoFullReviewPending: boolean
+  autoProgress: { chapterIdx: number; phase: string } | null
+  dedupStatus: string | null
 
   setTheme: (theme: ThemeMode) => void
   toggleSidebar: () => void
@@ -67,6 +69,8 @@ interface UIState {
   removeToast: (id: string) => void
   setAutoGenerating: (v: boolean) => void
   setAutoFullReviewPending: (v: boolean) => void
+  setAutoProgress: (progress: { chapterIdx: number; phase: string } | null) => void
+  setDedupStatus: (status: string | null) => void
 }
 
 let toastCounter = 0
@@ -88,6 +92,8 @@ export const useUIStore = create<UIState>()(
       toasts: [],
       autoGenerating: false,
       autoFullReviewPending: false,
+      autoProgress: null,
+      dedupStatus: null,
 
       setTheme: (theme) => set({ theme }),
       toggleSidebar: () => set((state) => ({ sidebarCollapsed: !state.sidebarCollapsed })),
@@ -131,6 +137,9 @@ export const useUIStore = create<UIState>()(
       setAutoGenerating: (v) => set({ autoGenerating: v }),
 
       setAutoFullReviewPending: (v) => set({ autoFullReviewPending: v }),
+
+      setAutoProgress: (progress) => set({ autoProgress: progress }),
+      setDedupStatus: (status) => set({ dedupStatus: status }),
     }),
     {
       name: 'abook-ui',

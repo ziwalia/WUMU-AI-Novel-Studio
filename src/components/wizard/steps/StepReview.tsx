@@ -4,6 +4,7 @@ import { useGeneration } from '@/hooks/useGeneration'
 import { buildSystemPrompt, reviewPrompt } from '@/services/prompts'
 import { Button } from '@/components/shared/Button'
 import { Spinner } from '@/components/shared/Spinner'
+import { parseJsonFromLLM } from '@/lib/extractJson'
 import type { Message } from '@/types'
 
 interface ReviewIssue {
@@ -21,15 +22,7 @@ interface ReviewResult {
 }
 
 function parseReview(raw: string): ReviewResult | null {
-  try {
-    const jsonMatch = raw.match(/```json\s*([\s\S]*?)\s*```/)
-    if (jsonMatch?.[1]) {
-      return JSON.parse(jsonMatch[1])
-    }
-    return JSON.parse(raw)
-  } catch {
-    return null
-  }
+  return parseJsonFromLLM<ReviewResult>(raw)
 }
 
 const severityColors: Record<string, string> = {
@@ -53,6 +46,9 @@ const typeLabels: Record<string, string> = {
   foreshadowing: '伏笔',
   style: '文笔',
   continuity: '连贯',
+  scene_diversity: '场景',
+  transition: '过渡',
+  blueprint: '计划',
 }
 
 export function StepReview() {
@@ -85,10 +81,31 @@ export function StepReview() {
       .map((f) => `[${f.type}] 第${f.plantedChapter + 1}章埋: ${f.content}`)
       .join('\n')
 
-    // Build character summary from structured characters
+    // Build full character data including status and location
     const charSummary = project.characters.length > 0
-      ? project.characters.map((c) => `${c.name}(${c.weight}): ${c.basicInfo}`).join('\n')
+      ? project.characters.map((c) => {
+          const status = c.lifeStatus === 'dead' ? '【已死亡】' : c.lifeStatus === 'alive' ? '【存活】' : ''
+          const loc = c.locationTrajectory.length > 0 ? `当前位置：${c.locationTrajectory[c.locationTrajectory.length - 1]}` : ''
+          return `- ${c.name}（${c.weight}）${status}：年龄${c.age || '未知'}，性格：${c.personality || '未知'}，能力：${c.abilities.join('、') || '无'}。${c.basicInfo}${loc ? '，' + loc : ''}`
+        }).join('\n')
       : project.params.coreCharacters
+
+    // Build relationship list
+    const relSummary = project.relationships.length > 0
+      ? project.relationships.map((r) => `- ${r.from} ←${r.type}→ ${r.to}${r.description ? `：${r.description}` : ''}`).join('\n')
+      : undefined
+
+    // Build blueprint chapter context
+    let blueprintChapter: { title: string; summary: string } | undefined
+    if (project.blueprint) {
+      try {
+        const bp = JSON.parse(project.blueprint)
+        if (Array.isArray(bp)) {
+          const ch = bp.find((c: Record<string, unknown>) => c.chapterIndex === chapterIdx)
+          if (ch) blueprintChapter = { title: String(ch.title), summary: String(ch.summary) }
+        }
+      } catch { /* ignore */ }
+    }
 
     // Build continuity context for review — use snapshot before this chapter
     const continuityContext: Parameters<typeof reviewPrompt>[3] = {}
@@ -111,7 +128,8 @@ export function StepReview() {
       {
         role: 'user',
         content: reviewPrompt(chapterContent, charSummary, openFs || undefined,
-          Object.keys(continuityContext).length > 0 ? continuityContext : undefined),
+          Object.keys(continuityContext).length > 0 ? continuityContext : undefined,
+          { blueprintChapter, relationships: relSummary }),
       },
     ]
 

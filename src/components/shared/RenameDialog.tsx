@@ -32,7 +32,7 @@ export function RenameDialog({ open, currentName, onConfirm, onCancel }: RenameD
   }
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40" onClick={onCancel}>
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40">
       <div
         className="bg-[var(--color-surface)] rounded-lg shadow-xl w-[360px] flex flex-col border border-[var(--color-border)]"
         onClick={(e) => e.stopPropagation()}

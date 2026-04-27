@@ -33,7 +33,7 @@ export function SettingsDialog() {
   if (!settingsOpen) return null
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40" onClick={() => setSettingsOpen(false)}>
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40">
       <div
         className="bg-[var(--color-surface)] rounded-lg shadow-xl flex flex-col border border-[var(--color-border)]"
         style={{ width: '90vw', minWidth: '920px', maxWidth: '1200px', height: '80vh', fontFamily: "'Microsoft YaHei', sans-serif", fontWeight: 600 }}
